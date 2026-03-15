@@ -5,7 +5,15 @@ import { WorktreeManager } from './worktree/WorktreeManager';
 export function activate(context: vscode.ExtensionContext) {
   const worktreeManager = new WorktreeManager();
 
+  // Status bar button
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  statusBarItem.text = '$(terminal) ∞ Terminal';
+  statusBarItem.tooltip = 'Open Infinite Terminal Canvas';
+  statusBarItem.command = 'infiniteTerminal.openCanvas';
+  statusBarItem.show();
+
   context.subscriptions.push(
+    statusBarItem,
     vscode.commands.registerCommand('infiniteTerminal.openCanvas', () => {
       InfiniteCanvasPanel.createOrShow(context, worktreeManager);
     }),
