@@ -1,60 +1,31 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ensureNodePtySpawnHelperExecutable } from './PtyManager';
+import { PtyManager } from './PtyManager';
 
 describe('PtyManager', () => {
-  describe('ensureNodePtySpawnHelperExecutable', () => {
-    it('should make spawn-helper executable on Darwin when execute bits are missing', () => {
-      const chmodSync = vi.fn();
+  it('should report isAvailable based on node-pty load', () => {
+    const mgr = new PtyManager();
+    // isAvailable is a boolean getter — just verify it doesn't throw
+    expect(typeof mgr.isAvailable).toBe('boolean');
+    mgr.dispose();
+  });
 
-      ensureNodePtySpawnHelperExecutable({
-        arch: 'arm64',
-        chmodSync,
-        existsSync: vi.fn(() => true),
-        hasPty: true,
-        platform: 'darwin',
-        resolveNodePtyRoot: () => '/tmp/node-pty',
-        statSync: vi.fn(() => ({ mode: 0o644 }) as never),
-        warn: vi.fn(),
-      });
+  it('should register data/exit/activity callbacks without throwing', () => {
+    const mgr = new PtyManager();
+    mgr.onData(vi.fn());
+    mgr.onExit(vi.fn());
+    mgr.onActivity(vi.fn());
+    mgr.dispose();
+  });
 
-      expect(chmodSync).toHaveBeenCalledWith(
-        '/tmp/node-pty/prebuilds/darwin-arm64/spawn-helper',
-        0o755,
-      );
-    });
-
-    it('should skip chmod when the helper is already executable', () => {
-      const chmodSync = vi.fn();
-
-      ensureNodePtySpawnHelperExecutable({
-        arch: 'arm64',
-        chmodSync,
-        existsSync: vi.fn(() => true),
-        hasPty: true,
-        platform: 'darwin',
-        resolveNodePtyRoot: () => '/tmp/node-pty',
-        statSync: vi.fn(() => ({ mode: 0o755 }) as never),
-        warn: vi.fn(),
-      });
-
-      expect(chmodSync).not.toHaveBeenCalled();
-    });
-
-    it('should skip chmod when the platform is not Darwin', () => {
-      const chmodSync = vi.fn();
-
-      ensureNodePtySpawnHelperExecutable({
-        chmodSync,
-        existsSync: vi.fn(() => true),
-        hasPty: true,
-        platform: 'linux',
-        resolveNodePtyRoot: () => '/tmp/node-pty',
-        statSync: vi.fn(() => ({ mode: 0o644 }) as never),
-        warn: vi.fn(),
-      });
-
-      expect(chmodSync).not.toHaveBeenCalled();
-    });
+  it('should return false for spawn when node-pty is unavailable', () => {
+    const mgr = new PtyManager();
+    // If node-pty is available this will actually spawn — kill it after.
+    // If not available it returns false immediately.
+    if (!mgr.isAvailable) {
+      const result = mgr.spawn('test-id', 'test', '', '/tmp', 80, 24);
+      expect(result).toBe(false);
+    }
+    mgr.dispose();
   });
 });

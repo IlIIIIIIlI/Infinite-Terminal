@@ -50,20 +50,10 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand('infiniteTerminal.toggleOfficeView', async () => {
-      try {
-        await vscode.commands.executeCommand('pixel-agents.showPanel');
-      } catch {
-        const install = await vscode.window.showWarningMessage(
-          'Pixel Agents extension is not installed. Install it for the pixel office view.',
-          'Install',
-        );
-        if (install) {
-          vscode.commands.executeCommand(
-            'workbench.extensions.installExtension',
-            'pablodelucca.pixel-agents',
-          );
-        }
+    vscode.commands.registerCommand('infiniteTerminal.toggleOfficeView', () => {
+      const panel = InfiniteCanvasPanel.currentPanel;
+      if (panel) {
+        panel.toggleOfficeView();
       }
     }),
 

@@ -92,9 +92,24 @@
           "type": "array",
           "default": [
             {
-              "name": "Claude Code",
+              "name": "Shell",
               "icon": "terminal",
-              "command": "claude"
+              "command": ""
+            },
+            {
+              "name": "Node.js",
+              "icon": "code",
+              "command": "node"
+            },
+            {
+              "name": "Python",
+              "icon": "code",
+              "command": "python3"
+            },
+            {
+              "name": "Vim",
+              "icon": "edit",
+              "command": "vim"
             }
           ],
           "description": "Preset terminal configurations"
@@ -166,8 +181,6 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
-    "node-pty": "^1.0.0",
-    "xterm": "^5.3.0",
-    "xterm-addon-fit": "^0.8.0"
+    "node-pty": "^1.0.0"
   }
 }

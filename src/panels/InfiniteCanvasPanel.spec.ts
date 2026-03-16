@@ -36,8 +36,6 @@ vi.mock('vscode', () => {
     reveal: vi.fn(),
     dispose: vi.fn(),
     webview: {
-      asWebviewUri: vi.fn(() => ({ toString: () => '/webview-resource' })),
-      cspSource: 'https://csp.test',
       html: '',
       postMessage: postMessageMock,
       onDidReceiveMessage: vi.fn(
@@ -134,9 +132,9 @@ describe('InfiniteCanvasPanel', () => {
       .find((message) => message.type === type);
   }
 
-  it('should report hasPty false when a single terminal falls back to the VS Code terminal', async () => {
+  it('should fall back to VS Code terminal when PTY is unavailable', async () => {
     ptyFactoryMock.mockImplementation(() => ({
-      isAvailable: true,
+      isAvailable: false,
       onActivity: vi.fn(),
       onData: vi.fn(),
       onExit: vi.fn(),
@@ -161,11 +159,12 @@ describe('InfiniteCanvasPanel', () => {
     expect(findPostedMessage('terminalCreated')).toMatchObject({
       type: 'terminalCreated',
       name: 'Fallback',
-      command: '',
       cwd: '/workspace',
       hasPty: false,
-      w: 600,
-      h: 400,
+    });
+    expect(findPostedMessage('terminalOutput')).toMatchObject({
+      type: 'terminalOutput',
+      data: expect.stringContaining('Fallback mode'),
     });
   });
 
@@ -183,36 +182,39 @@ describe('InfiniteCanvasPanel', () => {
     expect(findPostedMessage('terminalCreated')).toMatchObject({
       type: 'terminalCreated',
       name: 'Node',
-      command: 'node',
       cwd: '/workspace',
       hasPty: true,
-      w: 600,
-      h: 400,
     });
   });
 
-  it('should pass restored command and dimensions through the webview boundary', async () => {
+  it('should fall back for individual terminal when PTY spawn fails', async () => {
+    ptyFactoryMock.mockImplementation(() => ({
+      isAvailable: true,
+      onActivity: vi.fn(),
+      onData: vi.fn(),
+      onExit: vi.fn(),
+      spawn: vi.fn(() => false),
+      resize: vi.fn(),
+      getProcess: vi.fn(),
+      write: vi.fn(),
+      kill: vi.fn(),
+      dispose: vi.fn(),
+    }));
+
     const { receiveMessage } = createPanel();
 
     await receiveMessage({
       type: 'createTerminal',
-      name: 'Restored',
-      command: 'npm test',
-      cwd: '/workspace/project',
-      parentId: 'term-parent',
-      w: 840,
-      h: 560,
+      name: 'FailedPty',
+      command: '',
+      cwd: '/workspace',
     });
 
-    expect(findPostedMessage('terminalCreated')).toMatchObject({
-      type: 'terminalCreated',
-      name: 'Restored',
-      command: 'npm test',
-      cwd: '/workspace/project',
-      parentId: 'term-parent',
-      hasPty: true,
-      w: 840,
-      h: 560,
+    // When isAvailable is true but spawn fails, it falls back for that terminal
+    expect(createTerminalMock).toHaveBeenCalledTimes(1);
+    expect(findPostedMessage('terminalOutput')).toMatchObject({
+      type: 'terminalOutput',
+      data: expect.stringContaining('Fallback mode'),
     });
   });
 });

@@ -1,13 +1,6 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import { WorktreeManager } from '../worktree/WorktreeManager';
 import { PtyManager } from '../pty/PtyManager';
-import {
-  DEFAULT_TERMINAL_HEIGHT,
-  DEFAULT_TERMINAL_WIDTH,
-  SavedLayoutState,
-} from './layoutPersistence';
 import { getWebviewHtml } from './webviewHtml';
 
 interface TerminalSession {
@@ -17,6 +10,24 @@ interface TerminalSession {
   cwd: string;
   worktreeBranch?: string;
   parentId?: string; // for connection lines
+}
+
+interface SavedLayout {
+  terminals: Array<{
+    id: string;
+    name: string;
+    command: string;
+    cwd: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    worktreeBranch?: string;
+    parentId?: string;
+  }>;
+  canvasX: number;
+  canvasY: number;
+  zoom: number;
 }
 
 export class InfiniteCanvasPanel {
@@ -54,8 +65,6 @@ export class InfiniteCanvasPanel {
         localResourceRoots: [
           vscode.Uri.joinPath(context.extensionUri, 'media'),
           vscode.Uri.joinPath(context.extensionUri, 'dist'),
-          vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'xterm'),
-          vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'xterm-addon-fit'),
         ],
       },
     );
@@ -91,38 +100,7 @@ export class InfiniteCanvasPanel {
       this._panel.webview.postMessage({ type: 'terminalActivity', id, isActive });
     });
 
-    const xtermJsUri = this._panel.webview.asWebviewUri(
-      vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'xterm', 'lib', 'xterm.js'),
-    );
-    const fitAddonUri = this._panel.webview.asWebviewUri(
-      vscode.Uri.joinPath(
-        context.extensionUri,
-        'node_modules',
-        'xterm-addon-fit',
-        'lib',
-        'xterm-addon-fit.js',
-      ),
-    );
-    // Inline xterm.css to avoid CSP/loading issues
-    const xtermCssPath = path.join(
-      context.extensionPath,
-      'node_modules',
-      'xterm',
-      'css',
-      'xterm.css',
-    );
-    let xtermCss = '';
-    try {
-      xtermCss = fs.readFileSync(xtermCssPath, 'utf8');
-    } catch {
-      /* noop */
-    }
-    this._panel.webview.html = getWebviewHtml(
-      xtermJsUri.toString(),
-      xtermCss,
-      fitAddonUri.toString(),
-      this._panel.webview.cspSource,
-    );
+    this._panel.webview.html = getWebviewHtml();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
     vscode.commands.executeCommand('setContext', 'infiniteTerminal.canvasActive', true);
@@ -131,14 +109,7 @@ export class InfiniteCanvasPanel {
       async (message) => {
         switch (message.type) {
           case 'createTerminal':
-            this._doCreateTerminal(
-              message.name,
-              message.command,
-              message.cwd,
-              message.parentId,
-              message.w,
-              message.h,
-            );
+            this._doCreateTerminal(message.name, message.command, message.cwd, message.parentId);
             break;
           case 'closeTerminal':
             this._closeTerminal(message.id);
@@ -173,30 +144,29 @@ export class InfiniteCanvasPanel {
           case 'renameTerminal':
             this._renameTerminal(message.id, message.name);
             break;
-          case 'openPixelAgents':
-            vscode.commands.executeCommand('infiniteTerminal.toggleOfficeView');
-            break;
         }
       },
       null,
       this._disposables,
     );
 
-    // Listen for fallback terminal closes even when PTY is available globally.
-    vscode.window.onDidCloseTerminal(
-      (terminal) => {
-        for (const [id, t] of this._fallbackTerminals) {
-          if (t === terminal) {
-            this._panel.webview.postMessage({ type: 'terminalExited', id, exitCode: 0 });
-            this._fallbackTerminals.delete(id);
-            this._terminals.delete(id);
-            break;
+    // Fallback: listen for VS Code terminal close
+    if (this._useFallback) {
+      vscode.window.onDidCloseTerminal(
+        (terminal) => {
+          for (const [id, t] of this._fallbackTerminals) {
+            if (t === terminal) {
+              this._panel.webview.postMessage({ type: 'terminalExited', id, exitCode: 0 });
+              this._fallbackTerminals.delete(id);
+              this._terminals.delete(id);
+              break;
+            }
           }
-        }
-      },
-      null,
-      this._disposables,
-    );
+        },
+        null,
+        this._disposables,
+      );
+    }
   }
 
   public createTerminal(name?: string, command?: string, cwd?: string) {
@@ -208,21 +178,12 @@ export class InfiniteCanvasPanel {
     });
   }
 
-  private _doCreateTerminal(
-    name?: string,
-    command?: string,
-    cwd?: string,
-    parentId?: string,
-    w?: number,
-    h?: number,
-  ) {
+  private _doCreateTerminal(name?: string, command?: string, cwd?: string, parentId?: string) {
     this._terminalCounter++;
     const id = `term_${this._terminalCounter}_${Date.now()}`;
     const termName = name || `Terminal ${this._terminalCounter}`;
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const termCwd = cwd || workspaceFolder || process.env.HOME || '/';
-    const width = w ?? DEFAULT_TERMINAL_WIDTH;
-    const height = h ?? DEFAULT_TERMINAL_HEIGHT;
 
     const session: TerminalSession = {
       id,
@@ -233,36 +194,24 @@ export class InfiniteCanvasPanel {
     };
     this._terminals.set(id, session);
 
-    let hasPty = false;
-    let fallbackNotice: string | null = null;
     if (!this._useFallback) {
-      hasPty = this._ptyManager.spawn(id, termName, command || '', termCwd, 80, 24);
-      if (!hasPty) {
-        fallbackNotice = this._spawnFallbackTerminal(id, termName, command, termCwd);
+      const spawned = this._ptyManager.spawn(id, termName, command || '', termCwd, 80, 24);
+      if (!spawned) {
+        // Fall back to VS Code terminal for this one
+        this._spawnFallbackTerminal(id, termName, command, termCwd);
       }
     } else {
-      fallbackNotice = this._spawnFallbackTerminal(id, termName, command, termCwd);
+      this._spawnFallbackTerminal(id, termName, command, termCwd);
     }
 
     this._panel.webview.postMessage({
       type: 'terminalCreated',
       id,
       name: termName,
-      command: session.command,
       cwd: termCwd,
       parentId: parentId || null,
-      hasPty,
-      w: width,
-      h: height,
+      hasPty: !this._useFallback,
     });
-
-    if (fallbackNotice) {
-      this._panel.webview.postMessage({
-        type: 'terminalOutput',
-        id,
-        data: fallbackNotice,
-      });
-    }
   }
 
   private _spawnFallbackTerminal(
@@ -270,14 +219,19 @@ export class InfiniteCanvasPanel {
     name: string,
     command: string | undefined,
     cwd: string,
-  ): string {
+  ) {
     const terminal = vscode.window.createTerminal({
       name: `∞ ${name}`,
       cwd,
       shellPath: command || undefined,
     });
     this._fallbackTerminals.set(id, terminal);
-    return `[Fallback mode: node-pty not available. Output appears in VS Code terminal panel.]\r\n[Terminal: ∞ ${name}]\r\n\r\n`;
+    // In fallback mode, webview shows a message that output is in VS Code's terminal panel
+    this._panel.webview.postMessage({
+      type: 'terminalOutput',
+      id,
+      data: `[Fallback mode: node-pty not available. Output appears in VS Code terminal panel.]\r\n[Terminal: ∞ ${name}]\r\n\r\n`,
+    });
   }
 
   private _writeToTerminal(id: string, data: string) {
@@ -339,6 +293,10 @@ export class InfiniteCanvasPanel {
     }
   }
 
+  public toggleOfficeView() {
+    this._panel.webview.postMessage({ type: 'toggleOfficeView' });
+  }
+
   public async createWorktreeTerminal(branchName: string) {
     const info = await this._worktreeManager.createWorktree(branchName);
     if (info) {
@@ -357,12 +315,12 @@ export class InfiniteCanvasPanel {
     this._panel.webview.postMessage({ type: 'openSearch' });
   }
 
-  private _saveLayout(layout: SavedLayoutState) {
+  private _saveLayout(layout: SavedLayout) {
     this._context.workspaceState.update('infiniteTerminal.layout', layout);
   }
 
   private _restoreLayout() {
-    const layout = this._context.workspaceState.get<SavedLayoutState>('infiniteTerminal.layout');
+    const layout = this._context.workspaceState.get<SavedLayout>('infiniteTerminal.layout');
     if (layout) {
       this._panel.webview.postMessage({ type: 'restoreLayout', layout });
     }
@@ -376,8 +334,8 @@ export class InfiniteCanvasPanel {
     this._panel.webview.postMessage({ type: 'requestSaveLayout' });
 
     this._ptyManager.dispose();
-    for (const terminal of this._fallbackTerminals.values()) {
-      terminal.dispose();
+    for (const [, t] of this._fallbackTerminals) {
+      t.dispose();
     }
     this._fallbackTerminals.clear();
     this._terminals.clear();

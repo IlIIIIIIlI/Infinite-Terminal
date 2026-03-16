@@ -1,6 +1,4 @@
-import * as fs from 'fs';
 import * as os from 'os';
-import * as path from 'path';
 
 // node-pty is an optional native dependency
 let pty: any;
@@ -24,58 +22,6 @@ export type PtyDataCallback = (id: string, data: string) => void;
 export type PtyExitCallback = (id: string, exitCode: number) => void;
 export type PtyActivityCallback = (id: string, isActive: boolean) => void;
 
-interface EnsureSpawnHelperExecutableOptions {
-  arch?: string;
-  chmodSync?: typeof fs.chmodSync;
-  existsSync?: typeof fs.existsSync;
-  hasPty?: boolean;
-  platform?: string;
-  resolveNodePtyRoot?: () => string;
-  statSync?: typeof fs.statSync;
-  warn?: (message?: unknown, ...optionalParams: unknown[]) => void;
-}
-
-export function ensureNodePtySpawnHelperExecutable(
-  options: EnsureSpawnHelperExecutableOptions = {},
-) {
-  const {
-    arch = process.arch,
-    chmodSync = fs.chmodSync,
-    existsSync = fs.existsSync,
-    hasPty = pty !== null,
-    platform = process.platform,
-    resolveNodePtyRoot = () => path.dirname(require.resolve('node-pty/package.json')),
-    statSync = fs.statSync,
-    warn = console.warn,
-  } = options;
-
-  if (!hasPty || platform !== 'darwin') {
-    return;
-  }
-
-  try {
-    const helperPath = path.join(
-      resolveNodePtyRoot(),
-      'prebuilds',
-      `${platform}-${arch}`,
-      'spawn-helper',
-    );
-
-    if (!existsSync(helperPath)) {
-      return;
-    }
-
-    const stats = statSync(helperPath);
-    if ((stats.mode & 0o111) === 0o111) {
-      return;
-    }
-
-    chmodSync(helperPath, stats.mode | 0o111);
-  } catch (err) {
-    warn('Failed to fix node-pty spawn-helper permissions:', err);
-  }
-}
-
 export class PtyManager {
   private _processes: Map<string, PtyProcess> = new Map();
   private _onData: PtyDataCallback | null = null;
@@ -84,7 +30,6 @@ export class PtyManager {
   private _activityCheckInterval: NodeJS.Timer | null = null;
 
   constructor() {
-    this._ensureSpawnHelperExecutable();
     // Check activity every 2 seconds
     this._activityCheckInterval = setInterval(() => this._checkActivity(), 2000);
   }
@@ -168,7 +113,7 @@ export class PtyManager {
       try {
         proc.process.resize(cols, rows);
       } catch {
-        /* noop */
+        /* resize may fail if process exited */
       }
     }
   }
@@ -179,7 +124,7 @@ export class PtyManager {
       try {
         proc.process.kill();
       } catch {
-        /* noop */
+        /* kill may fail if already exited */
       }
       this._processes.delete(id);
     }
@@ -209,10 +154,6 @@ export class PtyManager {
       return process.env.COMSPEC || 'cmd.exe';
     }
     return process.env.SHELL || '/bin/bash';
-  }
-
-  private _ensureSpawnHelperExecutable() {
-    ensureNodePtySpawnHelperExecutable();
   }
 
   dispose() {

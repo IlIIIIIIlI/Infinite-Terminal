@@ -1,28 +1,12 @@
-import {
-  DEFAULT_TERMINAL_HEIGHT,
-  DEFAULT_TERMINAL_WIDTH,
-  normalizeLayoutTerminal,
-  normalizeSavedLayout,
-  serializeLayoutState,
-} from './layoutPersistence';
-
-export function getWebviewHtml(
-  xtermJsUri: string,
-  xtermCssInline: string,
-  fitAddonUri: string,
-  cspSource: string,
-): string {
+export function getWebviewHtml(): string {
   const nonce = getNonce();
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${cspSource} data:; img-src data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data:;">
   <title>Infinite Terminal</title>
-  <style>${xtermCssInline}</style>
-  <script nonce="${nonce}" src="${xtermJsUri}"></script>
-  <script nonce="${nonce}" src="${fitAddonUri}"></script>
   <style>${CSS_CONTENT}</style>
 </head>
 <body>
@@ -41,7 +25,7 @@ export function getWebviewHtml(
     <button class="toolbar-btn" id="btn-reset-zoom">🔍 100%</button>
     <div class="toolbar-sep"></div>
     <button class="toolbar-btn" id="btn-preset-mgr" title="Manage Presets">⚙️ Presets</button>
-    <!-- <button class="toolbar-btn" id="btn-office-view" title="Pixel Office View">🏢 Office</button> -->
+    <button class="toolbar-btn" id="btn-office-view" title="Pixel Office View">🏢 Office</button>
   </div>
 
   <!-- Preset Dock -->
@@ -56,20 +40,8 @@ export function getWebviewHtml(
   <!-- Search Modal -->
   <div id="search-modal" class="modal">
     <div class="modal-content search-modal-content">
-      <div class="field-group">
-        <label class="field-label" id="search-input-label" for="search-input">Search Terminals</label>
-        <input
-          id="search-input"
-          name="terminalSearch"
-          type="search"
-          placeholder="Search terminals by name..."
-          autocomplete="off"
-          enterkeyhint="search"
-          spellcheck="false"
-          autofocus
-        />
-      </div>
-      <div id="search-results" role="listbox" aria-label="Terminal search results"></div>
+      <input id="search-input" type="text" placeholder="Search terminals by name..." autofocus />
+      <div id="search-results"></div>
     </div>
   </div>
 
@@ -79,39 +51,15 @@ export function getWebviewHtml(
       <h3>Manage Presets</h3>
       <div id="preset-list"></div>
       <div class="modal-form">
-        <div class="field-group">
-          <label class="field-label" for="preset-name-input">Preset Name</label>
-          <input
-            id="preset-name-input"
-            name="presetName"
-            type="text"
-            placeholder="Name"
-            autocomplete="off"
-          />
-        </div>
-        <div class="field-group">
-          <label class="field-label" for="preset-cmd-input">Command</label>
-          <input
-            id="preset-cmd-input"
-            name="presetCommand"
-            type="text"
-            placeholder="Command (empty = shell)"
-            autocomplete="off"
-            autocapitalize="off"
-            autocorrect="off"
-            spellcheck="false"
-          />
-        </div>
-        <div class="field-group">
-          <label class="field-label" for="preset-icon-input">Icon</label>
-          <select id="preset-icon-input" name="presetIcon" aria-label="Preset icon">
-            <option value="terminal">⬛ Terminal</option>
-            <option value="code">📝 Code</option>
-            <option value="edit">✏️ Edit</option>
-            <option value="server">🖥️ Server</option>
-            <option value="database">🗄️ Database</option>
-          </select>
-        </div>
+        <input id="preset-name-input" type="text" placeholder="Name" />
+        <input id="preset-cmd-input" type="text" placeholder="Command (empty = shell)" />
+        <select id="preset-icon-input">
+          <option value="terminal">⬛ Terminal</option>
+          <option value="code">📝 Code</option>
+          <option value="edit">✏️ Edit</option>
+          <option value="server">🖥️ Server</option>
+          <option value="database">🗄️ Database</option>
+        </select>
         <button class="modal-btn" id="preset-add-btn">Add Preset</button>
       </div>
       <div class="modal-actions">
@@ -130,6 +78,15 @@ export function getWebviewHtml(
         <button class="modal-btn" id="worktree-new-btn">🌿 New Worktree</button>
         <button class="modal-btn modal-btn-secondary" id="worktree-close-btn">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Office View Overlay -->
+  <div id="office-view">
+    <canvas id="office-canvas"></canvas>
+    <div id="office-toolbar">
+      <button class="toolbar-btn" id="btn-close-office">← Canvas</button>
+      <button class="toolbar-btn" id="btn-new-terminal-office">⬛ New Terminal</button>
     </div>
   </div>
 
@@ -155,7 +112,6 @@ function getNonce() {
 // ============================================================
 const CSS_CONTENT = /*css*/ `
 :root {
-  color-scheme: dark;
   --bg: #1e1e1e; --surface: #252526; --border: #3c3c3c;
   --text: #cccccc; --accent: #007acc; --accent2: #1a8ad4;
   --term-bg: #0e0e0e; --header-bg: #2d2d2d;
@@ -195,21 +151,9 @@ body {
 .toolbar-btn {
   background:transparent; border:1px solid transparent; color:var(--text);
   padding:5px 10px; border-radius:4px; cursor:pointer; font-size:12px;
-  display:flex; align-items:center; gap:3px;
-  transition:background-color 0.15s,border-color 0.15s,transform 0.15s;
-  white-space:nowrap;
+  display:flex; align-items:center; gap:3px; transition:all 0.15s; white-space:nowrap;
 }
 .toolbar-btn:hover { background:var(--border); border-color:var(--accent); }
-.toolbar-btn:focus-visible,
-.preset-btn:focus-visible,
-.modal-btn:focus-visible,
-.terminal-close:focus-visible,
-.terminal-rename:focus-visible,
-.search-result:focus-visible {
-  outline:none;
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px rgba(0,122,204,0.25);
-}
 .toolbar-sep { width:1px; background:var(--border); margin:2px 3px; }
 
 /* Terminal Card */
@@ -243,34 +187,30 @@ body {
   border:1px solid var(--accent); color:var(--text); padding:1px 4px;
   border-radius:3px; outline:none;
 }
-.terminal-title-input:focus-visible {
-  outline:2px solid var(--accent2);
-  outline-offset:1px;
-}
 .terminal-cwd {
   font-size:10px; color:#888; max-width:180px; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap;
 }
-.terminal-close,
-.terminal-rename {
+.terminal-close {
   background:transparent; border:none; color:#888; cursor:pointer;
   font-size:14px; padding:2px 4px; border-radius:3px; line-height:1;
 }
 .terminal-close:hover { background:var(--danger); color:white; }
-.terminal-rename:hover { background:var(--border); color:var(--text); }
 
-/* Terminal Body - xterm.js container */
+/* Terminal Body - ANSI renderer */
 .terminal-body {
-  flex:1; background:var(--term-bg);
-  position:relative; overflow:hidden;
+  flex:1; background:var(--term-bg); padding:4px 6px;
+  font-family:'Cascadia Code','Fira Code','Consolas','Courier New',monospace;
+  font-size:13px; line-height:1.35; overflow-y:auto; overflow-x:hidden;
+  white-space:pre-wrap; word-break:break-all; color:#d4d4d4;
+  position:relative; cursor:text;
 }
-.terminal-body:focus-visible,
-.terminal-body.has-focus {
-  outline:2px solid var(--accent);
-  outline-offset:-2px;
+.terminal-body:focus { outline:none; }
+.terminal-body .cursor-block {
+  display:inline-block; width:7px; height:14px; background:var(--text);
+  animation:blink 1s step-end infinite; vertical-align:text-bottom;
 }
-.terminal-body .xterm { height:100%; }
-.terminal-body .xterm-viewport { overflow-y:auto; }
+@keyframes blink { 50%{opacity:0;} }
 
 /* Resize handle */
 .terminal-resize {
@@ -304,7 +244,7 @@ body {
   display:flex; flex-direction:column; align-items:center; gap:2px;
   background:transparent; border:1px solid transparent; color:var(--text);
   padding:6px 12px; border-radius:8px; cursor:pointer; font-size:11px;
-  transition:background-color 0.15s,border-color 0.15s,transform 0.15s;
+  transition:all 0.15s;
 }
 .preset-btn:hover { background:var(--border); border-color:var(--accent); transform:translateY(-2px); }
 .preset-icon { font-size:18px; }
@@ -326,29 +266,20 @@ body {
 .modal-content {
   background:var(--surface); border:1px solid var(--border); border-radius:10px;
   padding:16px 20px; min-width:400px; max-width:550px; max-height:70vh;
-  overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.6); overscroll-behavior:contain;
+  overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.6);
 }
 .modal-content h3 { margin-bottom:12px; font-size:15px; }
 .search-modal-content { padding:8px; min-width:450px; }
-.field-group { display:flex; flex-direction:column; gap:4px; }
-.field-label { font-size:12px; font-weight:600; color:#b8b8b8; }
 #search-input, .modal-content input, .modal-content select {
   width:100%; padding:8px 12px; background:var(--term-bg);
   border:1px solid var(--border); color:var(--text); border-radius:6px;
   font-size:14px; outline:none; margin-bottom:6px;
 }
-#search-input:focus-visible,
-.modal-content input:focus-visible,
-.modal-content select:focus-visible,
-.modal-content button:focus-visible {
-  border-color:var(--accent);
-}
-#search-results { max-height:300px; overflow-y:auto; overscroll-behavior:contain; }
+#search-input:focus, .modal-content input:focus { border-color:var(--accent); }
+#search-results { max-height:300px; overflow-y:auto; }
 .search-result {
-  width:100%; padding:8px 12px; cursor:pointer; border-radius:4px; display:flex;
+  padding:8px 12px; cursor:pointer; border-radius:4px; display:flex;
   align-items:center; gap:8px; font-size:13px;
-  border:1px solid transparent; background:transparent; color:var(--text);
-  text-align:left; font-family:inherit;
 }
 .search-result:hover, .search-result.selected { background:var(--border); }
 .search-result .sr-name { flex:1; font-weight:500; }
@@ -381,22 +312,42 @@ body {
   background:transparent; border:none; color:var(--accent); cursor:pointer; font-size:12px;
 }
 
+/* Office View */
+#office-view {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  z-index:2000; display:none; background:#2a1f3d;
+}
+#office-view.visible { display:block; }
+#office-canvas { width:100%; height:100%; image-rendering:pixelated; }
+#office-toolbar {
+  position:fixed; top:10px; left:50%; transform:translateX(-50%);
+  display:flex; gap:6px; background:rgba(40,30,60,0.9);
+  border:1px solid rgba(100,80,140,0.5); border-radius:8px; padding:6px 10px; z-index:2001;
+}
 
-`;
-
-const WEBVIEW_LAYOUT_HELPERS = /*js*/ `
-const DEFAULT_TERMINAL_WIDTH = ${DEFAULT_TERMINAL_WIDTH};
-const DEFAULT_TERMINAL_HEIGHT = ${DEFAULT_TERMINAL_HEIGHT};
-const normalizeLayoutTerminal = ${normalizeLayoutTerminal.toString()};
-const normalizeSavedLayout = ${normalizeSavedLayout.toString()};
-const serializeLayoutState = ${serializeLayoutState.toString()};
+/* ANSI color classes */
+.ansi-bold { font-weight:bold; }
+.ansi-dim { opacity:0.7; }
+.ansi-italic { font-style:italic; }
+.ansi-underline { text-decoration:underline; }
+.ansi-fg-black { color:#555; } .ansi-fg-red { color:#f44747; }
+.ansi-fg-green { color:#4ec9b0; } .ansi-fg-yellow { color:#dcdcaa; }
+.ansi-fg-blue { color:#569cd6; } .ansi-fg-magenta { color:#c586c0; }
+.ansi-fg-cyan { color:#9cdcfe; } .ansi-fg-white { color:#d4d4d4; }
+.ansi-fg-bright-black { color:#888; } .ansi-fg-bright-red { color:#f77; }
+.ansi-fg-bright-green { color:#6fdfb0; } .ansi-fg-bright-yellow { color:#ffe680; }
+.ansi-fg-bright-blue { color:#7bbbf0; } .ansi-fg-bright-magenta { color:#e0a0e0; }
+.ansi-fg-bright-cyan { color:#b0efff; } .ansi-fg-bright-white { color:#ffffff; }
+.ansi-bg-black { background:#555; } .ansi-bg-red { background:#f44747; }
+.ansi-bg-green { background:#4ec9b0; } .ansi-bg-yellow { background:#dcdcaa; }
+.ansi-bg-blue { background:#569cd6; } .ansi-bg-magenta { background:#c586c0; }
+.ansi-bg-cyan { background:#9cdcfe; } .ansi-bg-white { background:#d4d4d4; }
 `;
 
 // ============================================================
 // JS
 // ============================================================
 const JS_CONTENT = /*js*/ `
-${WEBVIEW_LAYOUT_HELPERS}
 const vscode = acquireVsCodeApi();
 
 // ==================== STATE ====================
@@ -407,7 +358,7 @@ const S = {
   dragTarget: null, dragOffsetX: 0, dragOffsetY: 0,
   lastMouseX: 0, lastMouseY: 0,
   nextTermX: 50, nextTermY: 50,
-  focusedTerminal: null,
+  officeViewActive: false, focusedTerminal: null,
   isResizing: false, resizeTarget: null,
   resizeStartW: 0, resizeStartH: 0, resizeStartX: 0, resizeStartY: 0,
   zCounter: 10,
@@ -423,6 +374,87 @@ const minimapCanvas = $('minimap-canvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 const zoomIndicator = $('zoom-indicator');
 const connectionSvg = $('connection-svg');
+
+// ==================== ANSI PARSER ====================
+const ANSI_COLORS = ['black','red','green','yellow','blue','magenta','cyan','white'];
+
+function parseAnsi(text) {
+  // Returns array of {text, classes} segments
+  const segments = [];
+  let current = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false };
+  let i = 0;
+  let buf = '';
+
+  function flushBuf() {
+    if (buf.length > 0) {
+      const cls = [];
+      if (current.bold) cls.push('ansi-bold');
+      if (current.dim) cls.push('ansi-dim');
+      if (current.italic) cls.push('ansi-italic');
+      if (current.underline) cls.push('ansi-underline');
+      if (current.fg !== null) cls.push(current.fg);
+      if (current.bg !== null) cls.push(current.bg);
+      segments.push({ text: buf, classes: cls.join(' ') });
+      buf = '';
+    }
+  }
+
+  while (i < text.length) {
+    if (text[i] === '\\x1b' || text[i] === '\\u001b' || text.charCodeAt(i) === 27) {
+      flushBuf();
+      if (text[i+1] === '[') {
+        let j = i + 2;
+        while (j < text.length && text[j] !== 'm' && text[j] !== 'A' && text[j] !== 'B' &&
+               text[j] !== 'C' && text[j] !== 'D' && text[j] !== 'H' && text[j] !== 'J' &&
+               text[j] !== 'K' && text[j] !== 'h' && text[j] !== 'l' && j - i < 20) j++;
+        if (text[j] === 'm') {
+          const codes = text.substring(i+2, j).split(';').map(Number);
+          for (let ci = 0; ci < codes.length; ci++) {
+            const c = codes[ci];
+            if (c === 0) { current = { fg:null,bg:null,bold:false,dim:false,italic:false,underline:false }; }
+            else if (c === 1) current.bold = true;
+            else if (c === 2) current.dim = true;
+            else if (c === 3) current.italic = true;
+            else if (c === 4) current.underline = true;
+            else if (c >= 30 && c <= 37) current.fg = 'ansi-fg-' + ANSI_COLORS[c-30];
+            else if (c >= 40 && c <= 47) current.bg = 'ansi-bg-' + ANSI_COLORS[c-40];
+            else if (c >= 90 && c <= 97) current.fg = 'ansi-fg-bright-' + ANSI_COLORS[c-90];
+            else if (c >= 100 && c <= 107) current.bg = 'ansi-bg-bright-' + ANSI_COLORS[c-100];
+            else if (c === 39) current.fg = null;
+            else if (c === 49) current.bg = null;
+          }
+          i = j + 1;
+          continue;
+        }
+        // Other escape sequences - skip
+        i = j + 1;
+        continue;
+      }
+      i++;
+      continue;
+    }
+    // Filter carriage return for line handling
+    if (text[i] === '\\r') { i++; continue; }
+    buf += text[i];
+    i++;
+  }
+  flushBuf();
+  return segments;
+}
+
+function renderAnsiToHtml(text) {
+  const segs = parseAnsi(text);
+  let html = '';
+  for (const s of segs) {
+    const escaped = s.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (s.classes) {
+      html += '<span class="' + s.classes + '">' + escaped + '</span>';
+    } else {
+      html += escaped;
+    }
+  }
+  return html;
+}
 
 // ==================== CANVAS TRANSFORM ====================
 function updateTransform() {
@@ -492,31 +524,19 @@ function updateMinimap() {
 }
 
 // ==================== TERMINAL CREATION ====================
-function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
-  const width = w ?? DEFAULT_TERMINAL_WIDTH;
-  const height = h ?? DEFAULT_TERMINAL_HEIGHT;
+function createTerminalCard(id, name, cwd, hasPty, parentId) {
+  const w=600, h=400;
   const x=S.nextTermX, y=S.nextTermY;
-  S.nextTermX += width + 30;
-  if (S.nextTermX > 2000) { S.nextTermX = 50; S.nextTermY += height + 30; }
+  S.nextTermX += 40; S.nextTermY += 40;
+  if (S.nextTermY > 500) { S.nextTermY = 50; S.nextTermX += 300; }
 
-  const layout = normalizeLayoutTerminal({
-    id,
-    name,
-    command: command || '',
-    cwd,
-    x,
-    y,
-    w: width,
-    h: height,
-    parentId: parentId || null
-  });
-  const t = { ...layout, status:'active', hasPty, xterm:null, fitAddon:null, pendingData:'' };
+  const t = { id, name, cwd, x, y, w, h, status:'active', outputBuf:'', hasPty, parentId: parentId||null };
   S.terminals.set(id, t);
 
   const card = document.createElement('div');
   card.className = 'terminal-card';
   card.id = 'term-' + id;
-  card.style.cssText = 'left:'+x+'px;top:'+y+'px;width:'+width+'px;height:'+height+'px';
+  card.style.cssText = 'left:'+x+'px;top:'+y+'px;width:'+w+'px;height:'+h+'px';
 
   const esc = s => { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; };
 
@@ -525,10 +545,9 @@ function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
       '<div class="terminal-status active"></div>' +
       '<span class="terminal-title" data-id="'+id+'" title="Double-click to rename">'+esc(name)+'</span>' +
       '<span class="terminal-cwd">'+esc(cwd||'')+'</span>' +
-      '<button class="terminal-rename" data-id="'+id+'" type="button" title="Rename terminal" aria-label="Rename terminal">✎</button>' +
       '<button class="terminal-close" data-id="'+id+'">✕</button>' +
     '</div>' +
-    '<div class="terminal-body"' + (hasPty ? ' tabindex="0"' : '') + ' data-id="'+id+'"></div>' +
+    '<div class="terminal-body" tabindex="0" data-id="'+id+'"></div>' +
     '<div class="terminal-resize" data-id="'+id+'"></div>';
 
   canvasEl.appendChild(card);
@@ -536,8 +555,7 @@ function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
   const header = card.querySelector('.terminal-header');
   const body = card.querySelector('.terminal-body');
   const closeBtn = card.querySelector('.terminal-close');
-  const renameBtn = card.querySelector('.terminal-rename');
-  let titleEl = card.querySelector('.terminal-title');
+  const titleEl = card.querySelector('.terminal-title');
   const resizeHandle = card.querySelector('.terminal-resize');
 
   // Drag header
@@ -545,64 +563,41 @@ function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
   closeBtn.addEventListener('click', () => closeTerminal(id));
   card.addEventListener('mousedown', () => focusTerminal(id));
 
-  body.addEventListener('focusin', () => body.classList.add('has-focus'));
-  body.addEventListener('focusout', () => body.classList.remove('has-focus'));
-
-  // xterm.js terminal instance
-  const term = new Terminal({
-    cursorBlink: hasPty,
-    disableStdin: !hasPty,
-    fontSize: 13,
-    fontFamily: "'Cascadia Code','Fira Code','Consolas','Courier New',monospace",
-    theme: {
-      background: '#0e0e0e',
-      foreground: '#d4d4d4',
-      cursor: '#d4d4d4',
-      selectionBackground: '#264f78',
-    },
-    allowTransparency: true,
-    scrollback: 5000,
+  // Keyboard input for real PTY
+  body.addEventListener('keydown', e => {
+    e.preventDefault(); e.stopPropagation();
+    let data = '';
+    if (e.key === 'Enter') data = '\\r';
+    else if (e.key === 'Backspace') data = '\\x7f';
+    else if (e.key === 'Tab') data = '\\t';
+    else if (e.key === 'Escape') data = '\\x1b';
+    else if (e.key === 'ArrowUp') data = '\\x1b[A';
+    else if (e.key === 'ArrowDown') data = '\\x1b[B';
+    else if (e.key === 'ArrowRight') data = '\\x1b[C';
+    else if (e.key === 'ArrowLeft') data = '\\x1b[D';
+    else if (e.key === 'Home') data = '\\x1b[H';
+    else if (e.key === 'End') data = '\\x1b[F';
+    else if (e.key === 'Delete') data = '\\x1b[3~';
+    else if (e.ctrlKey && e.key === 'c') data = '\\x03';
+    else if (e.ctrlKey && e.key === 'd') data = '\\x04';
+    else if (e.ctrlKey && e.key === 'z') data = '\\x1a';
+    else if (e.ctrlKey && e.key === 'l') data = '\\x0c';
+    else if (e.ctrlKey && e.key === 'a') data = '\\x01';
+    else if (e.ctrlKey && e.key === 'e') data = '\\x05';
+    else if (e.ctrlKey && e.key === 'u') data = '\\x15';
+    else if (e.ctrlKey && e.key === 'k') data = '\\x0b';
+    else if (e.ctrlKey && e.key === 'w') data = '\\x17';
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) data = e.key;
+    if (data) vscode.postMessage({ type:'terminalInput', id, data });
   });
-  const fitAddon = new FitAddon.FitAddon();
-  term.loadAddon(fitAddon);
-  t.xterm = term;
-  t.fitAddon = fitAddon;
 
-  // Delay xterm.open() until body has real dimensions to prevent measurement chars leaking
-  const initXterm = () => {
-    if (body.clientWidth > 0 && body.clientHeight > 0) {
-      term.open(body);
-      try { fitAddon.fit(); } catch {}
-      if (hasPty) {
-        vscode.postMessage({ type:'terminalResize', id, cols:term.cols, rows:term.rows });
-        term.onData(data => {
-          vscode.postMessage({ type:'terminalInput', id, data });
-        });
-      }
-
-      const doFit = () => {
-        try {
-          fitAddon.fit();
-          if (hasPty) {
-            vscode.postMessage({ type:'terminalResize', id, cols:term.cols, rows:term.rows });
-          }
-        } catch {}
-      };
-      new ResizeObserver(() => doFit()).observe(body);
-    } else {
-      requestAnimationFrame(initXterm);
-    }
-  };
-  requestAnimationFrame(initXterm);
-
-  function startRename(e) {
+  // Double-click title to rename
+  titleEl.addEventListener('dblclick', e => {
     e.stopPropagation();
-    const currentTitle = card.querySelector('.terminal-title');
-    if (!currentTitle) return;
     const input = document.createElement('input');
     input.className = 'terminal-title-input';
     input.value = t.name;
-    currentTitle.replaceWith(input);
+    titleEl.replaceWith(input);
     input.focus();
     input.select();
     const finish = () => {
@@ -613,18 +608,18 @@ function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
       newTitle.dataset.id = id;
       newTitle.title = 'Double-click to rename';
       newTitle.textContent = newName;
-      newTitle.addEventListener('dblclick', startRename);
+      newTitle.addEventListener('dblclick', e2 => {
+        e2.stopPropagation();
+        titleEl.dispatchEvent(new Event('dblclick'));
+      });
       input.replaceWith(newTitle);
-      titleEl = newTitle;
       vscode.postMessage({ type:'renameTerminal', id, name:newName });
       // Update office worker name
+      if (OFFICE.workers.has(id)) OFFICE.workers.get(id).name = newName;
     };
     input.addEventListener('blur', finish);
     input.addEventListener('keydown', e2 => { if(e2.key==='Enter') input.blur(); if(e2.key==='Escape'){input.value=t.name;input.blur();} });
-  }
-  // Double-click title or use explicit button to rename
-  titleEl.addEventListener('dblclick', startRename);
-  renameBtn.addEventListener('click', startRename);
+  });
 
   // Resize
   resizeHandle.addEventListener('mousedown', e => startResize(e,id));
@@ -634,6 +629,7 @@ function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
   updateConnectionLines();
 
   // Auto-create office worker
+  if (!OFFICE.workers.has(id)) officeAddWorker(id, name);
 
   return card;
 }
@@ -641,38 +637,30 @@ function createTerminalCard(id, name, command, cwd, hasPty, parentId, w, h) {
 function appendTerminalOutput(id, data) {
   const t = S.terminals.get(id);
   if (!t) return;
-  if (!t.xterm || !t.xterm.element) {
-    // Buffer data until xterm is ready
-    t.pendingData = (t.pendingData || '') + data;
-    const check = () => {
-      if (t.xterm && t.xterm.element) {
-        if (t.pendingData) { t.xterm.write(t.pendingData); t.pendingData = ''; }
-      } else { requestAnimationFrame(check); }
-    };
-    requestAnimationFrame(check);
-    return;
-  }
-  t.xterm.write(data);
+  t.outputBuf += data;
+  // Keep buffer bounded
+  if (t.outputBuf.length > 200000) t.outputBuf = t.outputBuf.slice(-150000);
+
+  const card = document.getElementById('term-'+id);
+  if (!card) return;
+  const body = card.querySelector('.terminal-body');
+  // Re-render (for simplicity; a real impl would do incremental)
+  body.innerHTML = renderAnsiToHtml(t.outputBuf) + '<span class="cursor-block"></span>';
+  body.scrollTop = body.scrollHeight;
 }
 
 function focusTerminal(id) {
-  const t = S.terminals.get(id);
-  if (!t) return;
   document.querySelectorAll('.terminal-card.focused').forEach(c => c.classList.remove('focused'));
   const card = document.getElementById('term-'+id);
   if (card) {
     card.classList.add('focused');
     card.style.zIndex = ++S.zCounter;
     S.focusedTerminal = id;
-    if (t.hasPty) {
-      t.xterm?.focus();
-    }
+    card.querySelector('.terminal-body')?.focus();
   }
 }
 
 function closeTerminal(id) {
-  const t = S.terminals.get(id);
-  if (t && t.xterm) t.xterm.dispose();
   const card = document.getElementById('term-'+id);
   if (card) card.remove();
   S.terminals.delete(id);
@@ -779,23 +767,16 @@ window.addEventListener('mouseup', () => {
   }
 });
 
-// Zoom (mouse wheel) + trackpad gestures (pan & pinch)
+// Zoom
 canvasContainer.addEventListener('wheel', e => {
-  e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-  if (e.ctrlKey || e.metaKey) {
-    // Pinch-to-zoom on trackpad / Ctrl+scroll / Cmd+scroll
-    const factor = e.ctrlKey ? 0.01 : 0.002;
-    const nz = Math.max(0.1, Math.min(3, S.zoom * (1 - e.deltaY * factor)));
-    S.canvasX = e.clientX - (e.clientX - S.canvasX) * (nz / S.zoom);
-    S.canvasY = e.clientY - (e.clientY - S.canvasY) * (nz / S.zoom);
-    S.zoom = nz;
-  } else if (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) > 0) {
-    // Two-finger pan on trackpad / regular scroll
-    S.canvasX -= e.deltaX;
-    S.canvasY -= e.deltaY;
-  }
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  const nz = Math.max(0.1, Math.min(3, S.zoom * delta));
+  S.canvasX = e.clientX - (e.clientX - S.canvasX) * (nz / S.zoom);
+  S.canvasY = e.clientY - (e.clientY - S.canvasY) * (nz / S.zoom);
+  S.zoom = nz;
   updateTransform(); updateMinimap();
-}, { passive: false, capture: true });
+}, { passive: false });
 
 // ==================== TOOLBAR ====================
 $('btn-new-terminal').addEventListener('click', () => {
@@ -814,8 +795,7 @@ $('btn-fit-all').addEventListener('click', fitAll);
 $('btn-reset-zoom').addEventListener('click', () => {
   S.zoom=1; S.canvasX=0; S.canvasY=0; updateTransform();
 });
-// Office view disabled for now
-// $('btn-office-view')?.addEventListener('click', () => { vscode.postMessage({ type:'openPixelAgents' }); });
+$('btn-office-view').addEventListener('click', toggleOfficeView);
 $('btn-preset-mgr').addEventListener('click', openPresetManager);
 
 function fitAll() {
@@ -868,19 +848,18 @@ function renderSearchResults(query) {
   const q = query.toLowerCase();
   for (const [id, t] of S.terminals) {
     if (q && !t.name.toLowerCase().includes(q) && !(t.cwd||'').toLowerCase().includes(q)) continue;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'search-result';
-    button.dataset.id = id;
+    const div = document.createElement('div');
+    div.className = 'search-result';
+    div.dataset.id = id;
     const statusCls = t.status === 'active' ? 'background:#4ec9b0' : t.status === 'idle' ? 'background:#dcdcaa' : 'background:#f44747';
-    button.innerHTML = '<div class="sr-status" style="'+statusCls+'"></div>' +
+    div.innerHTML = '<div class="sr-status" style="'+statusCls+'"></div>' +
       '<span class="sr-name">' + escHtml(t.name) + '</span>' +
       '<span class="sr-cwd">' + escHtml(t.cwd||'') + '</span>';
-    button.addEventListener('click', () => {
+    div.addEventListener('click', () => {
       navigateToTerminal(id);
       $('search-modal').classList.remove('visible');
     });
-    container.appendChild(button);
+    container.appendChild(div);
   }
   highlightSearchResult();
 }
@@ -959,10 +938,12 @@ function renderPresets(presets) {
   }
   const addBtn = document.createElement('button');
   addBtn.className = 'preset-btn';
-  addBtn.innerHTML = '<span class="preset-icon">➕</span>';
-  addBtn.title = 'New terminal';
+  addBtn.innerHTML = '<span class="preset-icon">➕</span>Custom';
   addBtn.addEventListener('click', () => {
-    vscode.postMessage({ type:'createTerminal', name:'Terminal', command:'' });
+    const name = prompt('Terminal name:');
+    if (!name) return;
+    const cmd = prompt('Command (empty = default shell):') || '';
+    vscode.postMessage({ type:'createTerminal', name, command:cmd });
   });
   dock.appendChild(addBtn);
 }
@@ -1005,47 +986,294 @@ let saveTimer = null;
 function autoSaveLayout() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    const layout = serializeLayoutState(S.terminals.values(), S.canvasX, S.canvasY, S.zoom);
-    vscode.postMessage({ type:'saveLayout', layout });
+    const terminals = [];
+    for (const [id, t] of S.terminals) {
+      terminals.push({ id:t.id, name:t.name, command:'', cwd:t.cwd, x:t.x, y:t.y, w:t.w, h:t.h, parentId:t.parentId||null });
+    }
+    vscode.postMessage({ type:'saveLayout', layout:{ terminals, canvasX:S.canvasX, canvasY:S.canvasY, zoom:S.zoom }});
   }, 1000);
 }
 
 function restoreLayout(layout) {
-  const normalizedLayout = normalizeSavedLayout(layout);
-  if (!normalizedLayout) return;
-  S.canvasX = normalizedLayout.canvasX;
-  S.canvasY = normalizedLayout.canvasY;
-  S.zoom = normalizedLayout.zoom;
+  if (!layout || !layout.terminals) return;
+  S.canvasX = layout.canvasX || 0;
+  S.canvasY = layout.canvasY || 0;
+  S.zoom = layout.zoom || 1;
   updateTransform();
-  for (const t of normalizedLayout.terminals) {
+  // We restore positions but terminals need to be re-created via backend
+  // Send info about desired positions
+  for (const t of layout.terminals) {
     S.nextTermX = t.x;
     S.nextTermY = t.y;
-    vscode.postMessage({
-      type:'createTerminal',
-      name:t.name,
-      command:t.command,
-      cwd:t.cwd,
-      parentId:t.parentId,
-      w:t.w,
-      h:t.h
-    });
+    vscode.postMessage({ type:'createTerminal', name:t.name, command:t.command||'', cwd:t.cwd, parentId:t.parentId });
   }
 }
 
-// ==================== PIXEL OFFICE (external via pixel-agents) ====================
+// ==================== PIXEL OFFICE VIEW ====================
+const officeView = $('office-view');
+const officeCanvas = $('office-canvas');
+const officeCtx = officeCanvas.getContext('2d');
+let officeAnimId = null;
 
-// Stubs - office view is handled by pixel-agents extension
-function officeAddWorker() {}
-function officeRemoveWorker() {}
-function officeSetStatus() {}
+const OFFICE = { floorY:0, deskSpacing:130, workers:new Map() };
+const PX = {
+  skin:'#ffcc99',
+  hair:['#3d2314','#8b4513','#d2691e','#ffd700','#1a1a2e','#c0c0c0','#e04040','#40e040'],
+  shirt:['#007acc','#4ec9b0','#d16969','#dcdcaa','#c586c0','#569cd6','#e06c60','#60c0e0'],
+  pants:'#2d2d5e', desk:'#8b6914', monitor:'#1e1e1e',
+  screenOff:'#0e0e0e', screenOn:'#0d3320',
+  floor:'#3d3552', wall:'#2a2040', chair:'#444',
+};
 
-// END PIXEL OFFICE STUBS
+class PixelWorker {
+  constructor(id, name, deskX, floorY) {
+    this.id = id; this.name = name;
+    this.deskX = deskX; this.x = deskX; this.y = floorY; this.floorY = floorY;
+    this.state = 'working'; this.frame = 0; this.dir = 1;
+    this.walkTarget = null; this.message = ''; this.msgTimer = 0;
+    this.hair = PX.hair[Math.floor(Math.random()*PX.hair.length)];
+    this.shirt = PX.shirt[Math.floor(Math.random()*PX.shirt.length)];
+    this.idleTimer = 0; this.actionTimer = Math.random()*300+100;
+    this.showMsg('Starting up...', 120);
+  }
+
+  showMsg(m, d) { this.message = m; this.msgTimer = d||120; }
+
+  update() {
+    this.frame++;
+    this.actionTimer--;
+    if (this.msgTimer > 0) this.msgTimer--;
+
+    if (this.state === 'working') {
+      if (this.actionTimer <= 0) {
+        if (Math.random() < 0.25) {
+          this.state = 'walking';
+          this.walkTarget = this.deskX + (Math.random()-0.5)*250;
+          const msgs = ['Taking a break~','☕ Coffee time','Stretching...','💭 Thinking...'];
+          this.showMsg(msgs[Math.floor(Math.random()*msgs.length)], 90);
+        } else {
+          const msgs = ['Working...','Coding...','Compiling...','Debugging...','Testing...','📝 Writing'];
+          this.showMsg(msgs[Math.floor(Math.random()*msgs.length)], 80);
+        }
+        this.actionTimer = Math.random()*400+200;
+      }
+    } else if (this.state === 'walking') {
+      const speed = 0.8;
+      if (Math.abs(this.x - this.walkTarget) < 2) {
+        this.state = 'idle'; this.idleTimer = Math.random()*150+50;
+        this.showMsg('☕', 60);
+      } else {
+        this.dir = this.walkTarget > this.x ? 1 : -1;
+        this.x += this.dir * speed;
+      }
+    } else if (this.state === 'idle') {
+      this.idleTimer--;
+      if (this.idleTimer <= 0) {
+        this.state = 'walking'; this.walkTarget = this.deskX;
+        this.showMsg('Back to work!', 90);
+      }
+    } else if (this.state === 'done') {
+      if (this.actionTimer <= 0) { this.state = 'working'; this.actionTimer = Math.random()*300+100; }
+    }
+    if (this.state === 'walking' && this.walkTarget === this.deskX && Math.abs(this.x-this.deskX)<2) {
+      this.x = this.deskX; this.state = 'working'; this.showMsg('Working...', 90);
+    }
+  }
+
+  draw(ctx, s) {
+    const px = this.x*s, py = this.y*s;
+    const atDesk = this.state==='working' || (this.state==='done' && Math.abs(this.x-this.deskX)<5);
+    const deskPx = this.deskX*s;
+
+    // Desk
+    ctx.fillStyle = PX.desk;
+    ctx.fillRect(deskPx-20*s, py-24*s, 40*s, 3*s);
+    ctx.fillRect(deskPx-18*s, py-24*s, 3*s, 24*s);
+    ctx.fillRect(deskPx+15*s, py-24*s, 3*s, 24*s);
+
+    // Monitor
+    ctx.fillStyle = PX.monitor;
+    ctx.fillRect(deskPx-10*s, py-40*s, 20*s, 14*s);
+    const on = this.state==='working'||this.state==='done';
+    ctx.fillStyle = on ? PX.screenOn : PX.screenOff;
+    ctx.fillRect(deskPx-8*s, py-38*s, 16*s, 10*s);
+    if (on && this.frame%10<7) {
+      ctx.fillStyle = '#4ec9b0';
+      for (let i=0;i<3;i++) ctx.fillRect(deskPx-6*s, (py-36*s)+i*3*s, (4+Math.floor(Math.random()*8))*s, 1*s);
+    }
+    ctx.fillStyle = PX.monitor;
+    ctx.fillRect(deskPx-2*s, py-26*s, 4*s, 3*s);
+
+    // Chair
+    if (atDesk) {
+      ctx.fillStyle = PX.chair;
+      ctx.fillRect(deskPx-8*s, py-16*s, 16*s, 2*s);
+      ctx.fillRect(deskPx-8*s, py-26*s, 2*s, 10*s);
+      ctx.fillRect(deskPx-6*s, py-2*s, 3*s, 2*s);
+      ctx.fillRect(deskPx+3*s, py-2*s, 3*s, 2*s);
+    }
+
+    // Character
+    const cx = px, cy = py;
+    // Legs
+    ctx.fillStyle = PX.pants;
+    if (this.state === 'walking') {
+      const lf = Math.floor(this.frame/8)%4;
+      const lo = [[-2,0,2,0],[-3,0,1,-1],[-2,0,2,0],[-1,-1,3,0]][lf];
+      ctx.fillRect(cx+lo[0]*s, cy-10*s+lo[1]*s, 3*s, 10*s);
+      ctx.fillRect(cx+lo[2]*s, cy-10*s+lo[3]*s, 3*s, 10*s);
+    } else {
+      ctx.fillRect(cx-2*s, cy-10*s, 3*s, 10*s);
+      ctx.fillRect(cx+2*s, cy-10*s, 3*s, 10*s);
+    }
+    // Body
+    ctx.fillStyle = this.shirt;
+    ctx.fillRect(cx-4*s, cy-20*s, 10*s, 11*s);
+    // Arms
+    if (atDesk && this.state==='working') {
+      ctx.fillRect(cx-6*s, cy-18*s, 3*s, 8*s);
+      ctx.fillRect(cx+5*s, cy-18*s, 3*s, 8*s);
+      ctx.fillStyle = PX.skin;
+      ctx.fillRect(cx-6*s, cy-11*s, 3*s, 2*s);
+      ctx.fillRect(cx+5*s, cy-11*s, 3*s, 2*s);
+    } else {
+      ctx.fillRect(cx-6*s, cy-19*s, 3*s, 10*s);
+      ctx.fillRect(cx+5*s, cy-19*s, 3*s, 10*s);
+      ctx.fillStyle = PX.skin;
+      ctx.fillRect(cx-6*s, cy-10*s, 3*s, 2*s);
+      ctx.fillRect(cx+5*s, cy-10*s, 3*s, 2*s);
+    }
+    // Head
+    ctx.fillStyle = PX.skin;
+    ctx.fillRect(cx-3*s, cy-28*s, 8*s, 8*s);
+    // Hair
+    ctx.fillStyle = this.hair;
+    ctx.fillRect(cx-3*s, cy-30*s, 8*s, 3*s);
+    if (this.dir===-1) ctx.fillRect(cx+4*s, cy-28*s, 1*s, 4*s);
+    else ctx.fillRect(cx-3*s, cy-28*s, 1*s, 4*s);
+    // Eyes
+    ctx.fillStyle = '#333';
+    if (this.frame%120 > 3) {
+      ctx.fillRect(cx-1*s, cy-25*s, 2*s, 2*s);
+      ctx.fillRect(cx+3*s, cy-25*s, 2*s, 2*s);
+    }
+
+    // Message bubble
+    if (this.message && this.msgTimer > 0) {
+      const mw = this.message.length * 5*s + 8*s;
+      const mx = cx - mw/2 + 2*s, my = cy - 42*s;
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(mx, my, mw, 10*s, 3*s);
+      else { ctx.moveTo(mx+3*s,my); ctx.lineTo(mx+mw-3*s,my); ctx.lineTo(mx+mw,my+10*s); ctx.lineTo(mx,my+10*s); ctx.closePath(); }
+      ctx.fill();
+      ctx.fillRect(cx, my+9*s, 4*s, 3*s);
+      ctx.fillStyle = '#333';
+      ctx.font = Math.max(8,7*s)+'px monospace';
+      ctx.fillText(this.message, mx+4*s, my+8*s);
+    }
+
+    // Name
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = Math.max(8,6*s)+'px monospace';
+    const nw = ctx.measureText(this.name).width;
+    ctx.fillText(this.name, cx-nw/2+2*s, cy+8*s);
+  }
+}
+
+function officeAddWorker(id, name) {
+  const cnt = OFFICE.workers.size;
+  const deskX = 80 + cnt * OFFICE.deskSpacing;
+  OFFICE.workers.set(id, new PixelWorker(id, name, deskX, OFFICE.floorY));
+}
+function officeRemoveWorker(id) { OFFICE.workers.delete(id); }
+
+function officeSetStatus(id, status, msg) {
+  const w = OFFICE.workers.get(id);
+  if (!w) return;
+  if (status === 'active') {
+    if (w.state !== 'working' && w.state !== 'walking') {
+      w.state = 'working'; w.showMsg(msg||'Working...', 120);
+    }
+  } else if (status === 'idle') {
+    if (w.state === 'working') {
+      w.showMsg(msg||'Waiting...', 120);
+    }
+  } else if (status === 'done') {
+    w.state = 'done'; w.showMsg(msg||'Done! ✓', 180); w.actionTimer = 200;
+  } else if (status === 'dead') {
+    w.state = 'idle'; w.idleTimer = 9999; w.showMsg('💀 Exited', 200);
+  }
+}
+
+function toggleOfficeView() {
+  S.officeViewActive = !S.officeViewActive;
+  if (S.officeViewActive) {
+    officeView.classList.add('visible');
+    for (const [id,t] of S.terminals) {
+      if (!OFFICE.workers.has(id)) officeAddWorker(id, t.name);
+    }
+    startOfficeAnim();
+  } else {
+    officeView.classList.remove('visible');
+    if (officeAnimId) { cancelAnimationFrame(officeAnimId); officeAnimId = null; }
+  }
+}
+
+function startOfficeAnim() {
+  const W = officeCanvas.width = officeCanvas.clientWidth;
+  const H = officeCanvas.height = officeCanvas.clientHeight;
+  OFFICE.floorY = H * 0.75;
+  for (const w of OFFICE.workers.values()) { w.floorY = OFFICE.floorY; w.y = OFFICE.floorY; }
+
+  function render() {
+    officeCtx.clearRect(0,0,W,H);
+    const sc = Math.min(W/800, H/400)*1.5;
+
+    // Wall
+    officeCtx.fillStyle = PX.wall;
+    officeCtx.fillRect(0,0,W,OFFICE.floorY);
+
+    // Windows
+    const wW=60*sc, wH=40*sc;
+    for (let i=0;i<3;i++) {
+      const wx=W*0.2+i*W*0.3, wy=OFFICE.floorY*0.3;
+      officeCtx.fillStyle='#1a1a3e'; officeCtx.fillRect(wx-wW/2,wy-wH/2,wW,wH);
+      officeCtx.fillStyle='#2a2a5e'; officeCtx.fillRect(wx-wW/2+2,wy-wH/2+2,wW-4,wH-4);
+      officeCtx.fillStyle='#555';
+      officeCtx.fillRect(wx-1,wy-wH/2,2,wH);
+      officeCtx.fillRect(wx-wW/2,wy-1,wW,2);
+    }
+
+    // Floor
+    officeCtx.fillStyle = PX.floor;
+    officeCtx.fillRect(0,OFFICE.floorY,W,H-OFFICE.floorY);
+    officeCtx.fillStyle = 'rgba(255,255,255,0.02)';
+    for (let x=0;x<W;x+=20*sc) officeCtx.fillRect(x,OFFICE.floorY,10*sc,H-OFFICE.floorY);
+
+    for (const w of OFFICE.workers.values()) { w.update(); w.draw(officeCtx, sc); }
+
+    officeCtx.fillStyle='rgba(255,255,255,0.3)'; officeCtx.font=12*sc+'px monospace';
+    officeCtx.fillText('🏢 Infinite Terminal Office', 10, 20*sc);
+    officeCtx.font=8*sc+'px monospace';
+    officeCtx.fillText(OFFICE.workers.size+' workers', 10, 34*sc);
+
+    if (S.officeViewActive) officeAnimId = requestAnimationFrame(render);
+  }
+  render();
+}
+
+$('btn-close-office').addEventListener('click', toggleOfficeView);
+$('btn-new-terminal-office').addEventListener('click', () => {
+  vscode.postMessage({ type:'createTerminal', name:'Terminal', command:'' });
+});
+
 // ==================== MESSAGE HANDLING ====================
 window.addEventListener('message', e => {
   const m = e.data;
   switch (m.type) {
     case 'terminalCreated':
-      createTerminalCard(m.id, m.name, m.command, m.cwd, m.hasPty, m.parentId, m.w, m.h);
+      createTerminalCard(m.id, m.name, m.cwd, m.hasPty, m.parentId);
       break;
     case 'terminalOutput':
       appendTerminalOutput(m.id, m.data);
@@ -1073,6 +1301,9 @@ window.addEventListener('message', e => {
     case 'worktrees':
       renderWorktrees(m.worktrees);
       break;
+    case 'toggleOfficeView':
+      toggleOfficeView();
+      break;
     case 'openSearch':
       openSearch();
       break;
@@ -1090,9 +1321,9 @@ function escHtml(t) { const d=document.createElement('div'); d.textContent=t; re
 
 // ==================== KEYBOARD SHORTCUTS ====================
 document.addEventListener('keydown', e => {
-  // Don't capture if typing in terminal (xterm.js textarea) or input
-  const active = document.activeElement;
-  const inTerminal = active?.closest('.terminal-body') || (active?.tagName === 'TEXTAREA' && active?.closest('.xterm'));
+  // Don't capture if typing in terminal or input
+  const tag = document.activeElement?.tagName;
+  const inTerminal = document.activeElement?.classList?.contains('terminal-body');
 
   if (!inTerminal) {
     if ((e.ctrlKey||e.metaKey) && e.key === 'p') {
@@ -1104,6 +1335,7 @@ document.addEventListener('keydown', e => {
     }
   }
   if (e.key === 'Escape') {
+    if (S.officeViewActive) toggleOfficeView();
     document.querySelectorAll('.modal.visible').forEach(m => m.classList.remove('visible'));
   }
 });
