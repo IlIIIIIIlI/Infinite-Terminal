@@ -150,7 +150,7 @@ body {
 
 /* Terminal Card */
 .terminal-card {
-  position:absolute; min-width:350px; min-height:220px;
+  position:absolute; min-width:0; min-height:0;
   background:var(--surface); border:1px solid var(--border); border-radius:8px;
   overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.5);
   display:flex; flex-direction:column; transition:box-shadow 0.2s;
@@ -337,7 +337,21 @@ function updateTransform() {
   zoomIndicator.textContent = Math.round(S.zoom*100) + '%';
   $('btn-reset-zoom').textContent = '🔍 ' + Math.round(S.zoom*100) + '%';
   drawGrid();
+  updateTerminalPositions();
   updateConnectionLines();
+}
+
+// Position terminal cards in screen coords (not scaled by canvas transform)
+function updateTerminalPositions() {
+  for (const [id, t] of S.terminals) {
+    const card = document.getElementById('term-'+id);
+    if (card) {
+      card.style.left = (t.x * S.zoom + S.canvasX) + 'px';
+      card.style.top = (t.y * S.zoom + S.canvasY) + 'px';
+      card.style.width = (t.w * S.zoom) + 'px';
+      card.style.height = (t.h * S.zoom) + 'px';
+    }
+  }
 }
 
 function drawGrid() {
@@ -411,7 +425,7 @@ function createTerminalCard(id, name, cwd, hasPty, parentId) {
   const card = document.createElement('div');
   card.className = 'terminal-card';
   card.id = 'term-' + id;
-  card.style.cssText = 'left:'+x+'px;top:'+y+'px;width:'+w+'px;height:'+h+'px';
+  card.style.cssText = 'left:'+(x*S.zoom+S.canvasX)+'px;top:'+(y*S.zoom+S.canvasY)+'px;width:'+(w*S.zoom)+'px;height:'+(h*S.zoom)+'px';
 
   const esc = s => { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; };
 
@@ -425,7 +439,7 @@ function createTerminalCard(id, name, cwd, hasPty, parentId) {
     '<div class="terminal-body" data-id="'+id+'"></div>' +
     '<div class="terminal-resize" data-id="'+id+'"></div>';
 
-  canvasEl.appendChild(card);
+  canvasContainer.appendChild(card);
 
   const header = card.querySelector('.terminal-header');
   const body = card.querySelector('.terminal-body');
@@ -637,7 +651,10 @@ window.addEventListener('mousemove', e => {
     t.x = (e.clientX - S.canvasX) / S.zoom - S.dragOffsetX;
     t.y = (e.clientY - S.canvasY) / S.zoom - S.dragOffsetY;
     const card = document.getElementById('term-'+S.dragTarget);
-    if (card) { card.style.left=t.x+'px'; card.style.top=t.y+'px'; }
+    if (card) {
+      card.style.left = (t.x * S.zoom + S.canvasX) + 'px';
+      card.style.top = (t.y * S.zoom + S.canvasY) + 'px';
+    }
     minimapEl.classList.add('visible');
     updateMinimap(); updateConnectionLines();
   }
@@ -647,7 +664,10 @@ window.addEventListener('mousemove', e => {
     t.w = Math.max(350, S.resizeStartW + (e.clientX-S.resizeStartX)/S.zoom);
     t.h = Math.max(220, S.resizeStartH + (e.clientY-S.resizeStartY)/S.zoom);
     const card = document.getElementById('term-'+S.resizeTarget);
-    if (card) { card.style.width=t.w+'px'; card.style.height=t.h+'px'; }
+    if (card) {
+      card.style.width = (t.w * S.zoom) + 'px';
+      card.style.height = (t.h * S.zoom) + 'px';
+    }
   }
 });
 
