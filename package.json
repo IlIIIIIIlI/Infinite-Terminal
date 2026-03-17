@@ -2,7 +2,7 @@
   "name": "infinite-terminal",
   "displayName": "Infinite Terminal",
   "description": "An infinite canvas for managing multiple terminals with pixel art office view",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "publisher": "LouisYeah",
   "license": "MIT",
   "repository": {
