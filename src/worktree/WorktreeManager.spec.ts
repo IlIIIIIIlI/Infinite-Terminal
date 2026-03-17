@@ -1,3 +1,4 @@
+import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execSyncMock = vi.hoisted(() => vi.fn());
@@ -114,7 +115,7 @@ describe('WorktreeManager', () => {
       const result = await manager.createWorktree('feature/login');
 
       expect(result).toEqual({
-        path: '/workspace/.worktrees/feature_login',
+        path: path.join('/workspace', '.worktrees', 'feature_login'),
         branch: 'feature/login',
         isNew: false,
       });
@@ -137,7 +138,7 @@ describe('WorktreeManager', () => {
       const result = await manager.createWorktree('feature/special@branch');
 
       expect(result).toEqual({
-        path: '/workspace/.worktrees/feature_special_branch',
+        path: path.join('/workspace', '.worktrees', 'feature_special_branch'),
         branch: 'feature/special@branch',
         isNew: true,
       });
