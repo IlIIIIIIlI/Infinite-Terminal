@@ -71,5 +71,5 @@ jobs:
         run: |
           git add package.json package-lock.json
           git commit -m "chore: bump version to ${{ steps.bump.outputs.version }} [skip ci]"
-          git tag "v${{ steps.bump.outputs.version }}"
-          git push origin main --tags
+          git tag -f "v${{ steps.bump.outputs.version }}"
+          git push origin main --follow-tags --force
