@@ -28,6 +28,7 @@ export function getWebviewHtml(
     <div class="toolbar-sep"></div>
     <button class="toolbar-btn" id="btn-search" title="Search Terminals (Ctrl+P)">🔍 Search</button>
     <button class="toolbar-btn" id="btn-fit-all" title="Fit All">⊞ Fit</button>
+    <button class="toolbar-btn" id="btn-auto-layout" title="Auto Layout">⊞ Layout</button>
     <button class="toolbar-btn" id="btn-reset-zoom">🔍 100%</button>
     <div class="toolbar-sep"></div>
     <button class="toolbar-btn" id="btn-preset-mgr" title="Manage Presets">⚙️ Presets</button>
@@ -718,6 +719,7 @@ $('btn-new-terminal').addEventListener('click', () => {
 });
 $('btn-search').addEventListener('click', () => openSearch());
 $('btn-fit-all').addEventListener('click', fitAll);
+$('btn-auto-layout').addEventListener('click', autoLayout);
 $('btn-reset-zoom').addEventListener('click', () => {
   S.zoom=1; S.canvasX=0; S.canvasY=0; updateTransform();
 });
@@ -739,6 +741,89 @@ function fitAll() {
   S.canvasX = (vw - cW*S.zoom)/2 - minX*S.zoom + pad*S.zoom;
   S.canvasY = (vh - cH*S.zoom)/2 - minY*S.zoom + pad*S.zoom + 50;
   updateTransform();
+}
+
+// ==================== AUTO LAYOUT ====================
+function autoLayout() {
+  const terms = [...S.terminals.values()];
+  if (terms.length === 0) return;
+
+  const gap = 30;
+  const vw = canvasContainer.clientWidth;
+  const vh = canvasContainer.clientHeight;
+
+  if (terms.length === 1) {
+    // Single terminal: center it
+    const t = terms[0];
+    t.x = 50;
+    t.y = 50;
+    applyTerminalPosition(t);
+    fitAll();
+    autoSaveLayout();
+    return;
+  }
+
+  // Calculate the ideal number of columns based on viewport aspect ratio
+  // and terminal count - try to make a roughly rectangular grid
+  const avgW = terms.reduce((s, t) => s + t.w, 0) / terms.length;
+  const avgH = terms.reduce((s, t) => s + t.h, 0) / terms.length;
+  const aspectRatio = vw / vh;
+  let cols = Math.max(1, Math.round(Math.sqrt(terms.length * aspectRatio * (avgH / avgW))));
+  cols = Math.min(cols, terms.length);
+
+  // Sort terminals: larger ones first for better packing
+  terms.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+
+  // Row-based packing: fill each row left-to-right, track row height
+  const rows = [];     // array of { terms: [], maxH: number }
+  let currentRow = { terms: [], maxH: 0 };
+  let colCount = 0;
+
+  for (const t of terms) {
+    if (colCount >= cols && currentRow.terms.length > 0) {
+      rows.push(currentRow);
+      currentRow = { terms: [], maxH: 0 };
+      colCount = 0;
+    }
+    currentRow.terms.push(t);
+    currentRow.maxH = Math.max(currentRow.maxH, t.h);
+    colCount++;
+  }
+  if (currentRow.terms.length > 0) rows.push(currentRow);
+
+  // Position each terminal
+  let cursorY = 50;
+  for (const row of rows) {
+    // Calculate total width needed for this row
+    const totalRowW = row.terms.reduce((s, t) => s + t.w, 0) + gap * (row.terms.length - 1);
+
+    // Start x: center the row
+    let cursorX = 50;
+
+    for (const t of row.terms) {
+      t.x = cursorX;
+      t.y = cursorY;
+      applyTerminalPosition(t);
+      cursorX += t.w + gap;
+    }
+    cursorY += row.maxH + gap;
+  }
+
+  // Animate into view
+  fitAll();
+  updateMinimap();
+  updateConnectionLines();
+  autoSaveLayout();
+}
+
+function applyTerminalPosition(t) {
+  const card = document.getElementById('term-' + t.id);
+  if (card) {
+    card.style.left = t.x + 'px';
+    card.style.top = t.y + 'px';
+    card.style.width = t.w + 'px';
+    card.style.height = t.h + 'px';
+  }
 }
 
 // ==================== SEARCH ====================
