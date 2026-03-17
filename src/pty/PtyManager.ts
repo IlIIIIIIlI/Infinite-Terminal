@@ -141,21 +141,23 @@ export class PtyManager {
     // Fallback: use script(1) to wrap shell in a real PTY
     log(`using fallback for ${id}`);
     try {
-      // Find a working shell
+      // Find a default shell only if no command is specified
       const fs = require('fs');
       let fallbackShell = shell;
-      if (!fs.existsSync(fallbackShell)) {
-        for (const sh of ['/bin/bash', '/bin/sh', '/bin/zsh']) {
+      if (!shellCommand) {
+        // No command given, find default shell
+        for (const sh of ['/bin/zsh', '/bin/bash', '/bin/sh']) {
           if (fs.existsSync(sh)) { fallbackShell = sh; break; }
         }
       }
+      log(`fallback shell resolved: ${fallbackShell}`);
 
       // Use script(1) to create a real PTY wrapper (works on Linux & macOS)
       let child;
       if (process.platform === 'linux') {
         child = cp.spawn('script', ['-qc', fallbackShell, '/dev/null'], {
           cwd: spawnCwd,
-          env: { ...process.env, TERM: 'xterm-256color', COLUMNS: String(cols || 80), LINES: String(rows || 24), SHELL: fallbackShell },
+          env: { ...process.env, TERM: 'xterm-256color', COLUMNS: String(cols || 80), LINES: String(rows || 24) },
           stdio: ['pipe', 'pipe', 'pipe'],
         });
       } else {
@@ -171,7 +173,16 @@ export class PtyManager {
         process: {
           _child: child,
           write: (data: string) => { child.stdin?.write(data); },
-          resize: () => {},
+          resize: (c: number, r: number) => {
+            // Send SIGWINCH and update env for resize
+            try {
+              process.kill(child.pid!, 'SIGWINCH');
+            } catch {}
+            // Also write stty resize command for script(1) wrapped shells
+            try {
+              child.stdin?.write(`stty cols ${c} rows ${r}\n`);
+            } catch {}
+          },
           kill: () => { child.kill(); },
         },
         lastDataTime: Date.now(), totalBytes: 0, isFallback: true,
