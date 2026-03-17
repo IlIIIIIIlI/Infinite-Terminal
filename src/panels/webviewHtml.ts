@@ -355,14 +355,29 @@ body {
 /* Group frame on canvas */
 .group-frame {
   position:absolute; border:2px solid; border-radius:12px;
-  pointer-events:none; transition: opacity 0.2s;
+  pointer-events:auto; cursor:grab; transition: opacity 0.2s, box-shadow 0.15s;
 }
+.group-frame.selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.group-frame.dragging { cursor:grabbing; }
 .group-frame-label {
   position:absolute; top:-24px; left:8px;
   font-size:11px; font-weight:600; padding:2px 10px; border-radius:4px;
   pointer-events:auto; cursor:pointer; white-space:nowrap;
   user-select:none;
 }
+.group-frame-actions {
+  position:absolute; top:-24px; right:8px; display:flex; gap:4px;
+  opacity:0; transition:opacity 0.15s;
+}
+.group-frame:hover .group-frame-actions,
+.group-frame.selected .group-frame-actions { opacity:1; }
+.group-frame-action {
+  font-size:10px; padding:2px 6px; border-radius:3px; cursor:pointer;
+  border:none; color:white; background:rgba(0,0,0,0.5);
+}
+.group-frame-action:hover { background:rgba(0,0,0,0.8); }
 
 /* Group nav bar (left side) */
 #group-nav {
@@ -424,6 +439,12 @@ const S = {
   presets: [],
   searchIdx: 0,
   editingGroupId: null,     // for group modal
+  selectedGroup: null,      // currently selected group id
+  isDraggingGroup: false,
+  dragGroupId: null,
+  dragGroupOffsetX: 0,
+  dragGroupOffsetY: 0,
+  dragGroupStartPositions: null,  // Map of termId -> {x, y}
 };
 
 const GROUP_COLORS = [
@@ -670,6 +691,7 @@ function appendTerminalOutput(id, data) {
 }
 
 function focusTerminal(id) {
+  deselectGroup();
   document.querySelectorAll('.terminal-card.focused').forEach(c => c.classList.remove('focused'));
   const card = document.getElementById('term-'+id);
   if (card) {
@@ -744,6 +766,7 @@ function startResize(e, id) {
 // Canvas pan
 canvasContainer.addEventListener('mousedown', e => {
   if (e.target===canvasContainer || e.target===canvasEl) {
+    deselectGroup();
     if (e.button===0) {
       S.isDraggingCanvas = true;
       S.lastMouseX = e.clientX; S.lastMouseY = e.clientY;
@@ -771,6 +794,29 @@ window.addEventListener('mousemove', e => {
     updateMinimap(); updateConnectionLines();
     updateAllGroupFrames();
   }
+  if (S.isDraggingGroup && S.dragGroupId) {
+    const group = S.groups.get(S.dragGroupId);
+    if (group && S.dragGroupStartPositions) {
+      const mouseCanvasX = (e.clientX - S.canvasX) / S.zoom;
+      const mouseCanvasY = (e.clientY - S.canvasY) / S.zoom;
+      const dx = mouseCanvasX - S.dragGroupOffsetX;
+      const dy = mouseCanvasY - S.dragGroupOffsetY;
+
+      for (const tid of group.terminalIds) {
+        const t = S.terminals.get(tid);
+        const start = S.dragGroupStartPositions.get(tid);
+        if (t && start) {
+          t.x = start.x + dx;
+          t.y = start.y + dy;
+          const card = document.getElementById('term-' + tid);
+          if (card) { card.style.left = t.x + 'px'; card.style.top = t.y + 'px'; }
+        }
+      }
+      minimapEl.classList.add('visible');
+      updateMinimap(); updateConnectionLines();
+      updateAllGroupFrames();
+    }
+  }
   if (S.isResizing && S.resizeTarget) {
     const t = S.terminals.get(S.resizeTarget);
     if (!t) return;
@@ -783,13 +829,20 @@ window.addEventListener('mousemove', e => {
 });
 
 window.addEventListener('mouseup', () => {
-  const wasDragging = S.isDraggingCanvas || S.isDraggingTerminal;
+  const wasDragging = S.isDraggingCanvas || S.isDraggingTerminal || S.isDraggingGroup;
   if (S.isDraggingCanvas) { S.isDraggingCanvas=false; canvasContainer.classList.remove('dragging-canvas'); }
   if (S.isDraggingTerminal) { S.isDraggingTerminal=false; S.dragTarget=null; canvasContainer.classList.remove('dragging-terminal'); autoSaveLayout(); }
+  if (S.isDraggingGroup) {
+    const frame = document.getElementById('gframe-' + S.dragGroupId);
+    if (frame) frame.classList.remove('dragging');
+    S.isDraggingGroup=false; S.dragGroupId=null; S.dragGroupStartPositions=null;
+    canvasContainer.classList.remove('dragging-terminal');
+    autoSaveLayout();
+  }
   if (S.isResizing) { S.isResizing=false; S.resizeTarget=null; autoSaveLayout(); }
   if (wasDragging) {
     setTimeout(() => {
-      if (!S.isDraggingCanvas && !S.isDraggingTerminal) minimapEl.classList.remove('visible');
+      if (!S.isDraggingCanvas && !S.isDraggingTerminal && !S.isDraggingGroup) minimapEl.classList.remove('visible');
     }, 1500);
   }
 });
@@ -929,12 +982,24 @@ function getGroupBounds(group) {
 
 function renderGroupFrame(group) {
   let frame = document.getElementById('gframe-' + group.id);
-  if (!frame) {
+  const isNew = !frame;
+  if (isNew) {
     frame = document.createElement('div');
     frame.className = 'group-frame';
     frame.id = 'gframe-' + group.id;
+    frame.dataset.groupId = group.id;
     // Insert at start of canvas so it's behind terminal cards
     canvasEl.insertBefore(frame, canvasEl.firstChild);
+
+    // Click to select group
+    frame.addEventListener('mousedown', (e) => {
+      // Only handle clicks on the frame background, not on terminals inside
+      if (e.target !== frame) return;
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      selectGroup(group.id);
+      startDragGroup(e, group.id);
+    });
   }
 
   const bounds = getGroupBounds(group);
@@ -953,12 +1018,44 @@ function renderGroupFrame(group) {
   if (!label) {
     label = document.createElement('div');
     label.className = 'group-frame-label';
-    label.addEventListener('dblclick', () => openGroupModal(group.id));
+    label.addEventListener('dblclick', (e) => { e.stopPropagation(); openGroupModal(group.id); });
+    label.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      selectGroup(group.id);
+      startDragGroup(e, group.id);
+    });
     frame.appendChild(label);
   }
   label.textContent = group.name;
   label.style.background = group.color;
   label.style.color = isLightColor(group.color) ? '#000' : '#fff';
+
+  // Action buttons (ungroup, edit)
+  let actions = frame.querySelector('.group-frame-actions');
+  if (!actions) {
+    actions = document.createElement('div');
+    actions.className = 'group-frame-actions';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'group-frame-action';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', (e) => { e.stopPropagation(); openGroupModal(group.id); });
+    editBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+
+    const ungroupBtn = document.createElement('button');
+    ungroupBtn.className = 'group-frame-action';
+    ungroupBtn.textContent = 'Ungroup';
+    ungroupBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteGroup(group.id); });
+    ungroupBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+
+    actions.appendChild(editBtn);
+    actions.appendChild(ungroupBtn);
+    frame.appendChild(actions);
+  }
+
+  // Update selected state
+  frame.classList.toggle('selected', S.selectedGroup === group.id);
 }
 
 function updateGroupFrame(group) {
@@ -976,6 +1073,44 @@ function isLightColor(hex) {
   const g = parseInt(hex.slice(3,5),16);
   const b = parseInt(hex.slice(5,7),16);
   return (r*0.299 + g*0.587 + b*0.114) > 150;
+}
+
+// ==================== GROUP SELECT & DRAG ====================
+function selectGroup(groupId) {
+  S.selectedGroup = groupId;
+  document.querySelectorAll('.group-frame').forEach(f => {
+    f.classList.toggle('selected', f.dataset.groupId === groupId);
+  });
+}
+
+function deselectGroup() {
+  S.selectedGroup = null;
+  document.querySelectorAll('.group-frame.selected').forEach(f => f.classList.remove('selected'));
+}
+
+function startDragGroup(e, groupId) {
+  const group = S.groups.get(groupId);
+  if (!group) return;
+
+  S.isDraggingGroup = true;
+  S.dragGroupId = groupId;
+
+  // Store starting mouse position in canvas coords
+  const mouseCanvasX = (e.clientX - S.canvasX) / S.zoom;
+  const mouseCanvasY = (e.clientY - S.canvasY) / S.zoom;
+  S.dragGroupOffsetX = mouseCanvasX;
+  S.dragGroupOffsetY = mouseCanvasY;
+
+  // Snapshot all terminal positions in this group
+  S.dragGroupStartPositions = new Map();
+  for (const tid of group.terminalIds) {
+    const t = S.terminals.get(tid);
+    if (t) S.dragGroupStartPositions.set(tid, { x: t.x, y: t.y });
+  }
+
+  const frame = document.getElementById('gframe-' + groupId);
+  if (frame) frame.classList.add('dragging');
+  canvasContainer.classList.add('dragging-terminal');
 }
 
 // ==================== GROUP NAV ====================
