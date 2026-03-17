@@ -412,6 +412,24 @@ body {
   opacity:0.4; cursor:default; pointer-events:none;
 }
 
+/* Terminal done flash */
+@keyframes terminal-done-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--flash-color, var(--accent)); }
+  50% { box-shadow: 0 0 16px 4px var(--flash-color, var(--accent)); }
+}
+.terminal-card.done-flash {
+  animation: terminal-done-pulse 1.2s ease-in-out infinite;
+}
+
+/* Group nav button flash */
+@keyframes gnb-done-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--flash-color, var(--accent)); filter:brightness(1); }
+  50% { box-shadow: 0 0 12px 3px var(--flash-color, var(--accent)); filter:brightness(1.3); }
+}
+.group-nav-btn.done-flash {
+  animation: gnb-done-pulse 1.2s ease-in-out infinite;
+}
+
 
 `;
 
@@ -692,6 +710,7 @@ function appendTerminalOutput(id, data) {
 
 function focusTerminal(id) {
   deselectGroup();
+  clearTerminalFlash(id);
   document.querySelectorAll('.terminal-card.focused').forEach(c => c.classList.remove('focused'));
   const card = document.getElementById('term-'+id);
   if (card) {
@@ -726,6 +745,59 @@ function updateTerminalStatus(id, status) {
   if (!card) return;
   const dot = card.querySelector('.terminal-status');
   dot.className = 'terminal-status ' + status;
+}
+
+function flashTerminalDone(id) {
+  // Don't flash if this terminal is currently focused
+  if (S.focusedTerminal === id) return;
+
+  const card = document.getElementById('term-' + id);
+  if (!card) return;
+
+  // Find group color for this terminal
+  let flashColor = null;
+  let groupId = null;
+  for (const [gid, g] of S.groups) {
+    if (g.terminalIds.has(id)) {
+      flashColor = g.color;
+      groupId = gid;
+      break;
+    }
+  }
+
+  // Flash the terminal card
+  card.style.setProperty('--flash-color', flashColor || 'var(--accent)');
+  card.classList.add('done-flash');
+
+  // Flash the group nav button if in a group
+  if (groupId) {
+    const navBtn = document.getElementById('gnav-' + groupId);
+    if (navBtn) {
+      navBtn.style.setProperty('--flash-color', flashColor);
+      navBtn.classList.add('done-flash');
+    }
+  }
+}
+
+function clearTerminalFlash(id) {
+  const card = document.getElementById('term-' + id);
+  if (card) card.classList.remove('done-flash');
+
+  // Clear group nav flash only if no other terminals in the group are still flashing
+  for (const [gid, g] of S.groups) {
+    if (g.terminalIds.has(id)) {
+      const othersFlashing = [...g.terminalIds].some(tid => {
+        if (tid === id) return false;
+        const c = document.getElementById('term-' + tid);
+        return c && c.classList.contains('done-flash');
+      });
+      if (!othersFlashing) {
+        const navBtn = document.getElementById('gnav-' + gid);
+        if (navBtn) navBtn.classList.remove('done-flash');
+      }
+      break;
+    }
+  }
 }
 
 // Navigate to terminal (for search)
@@ -1120,6 +1192,7 @@ function renderGroupNav() {
   for (const [_, g] of S.groups) {
     const btn = document.createElement('button');
     btn.className = 'group-nav-btn';
+    btn.id = 'gnav-' + g.id;
     btn.style.borderColor = g.color;
     btn.innerHTML = '<span class="gnb-dot" style="background:' + g.color + '"></span>' +
       escHtml(g.name) +
@@ -1609,6 +1682,7 @@ window.addEventListener('message', e => {
       updateTerminalStatus(m.id, 'dead');
       appendTerminalOutput(m.id, '\\r\\n[Process exited with code '+m.exitCode+']');
       officeSetStatus(m.id, 'dead');
+      flashTerminalDone(m.id);
       break;
     case 'terminalActivity':
       if (m.isActive) {
