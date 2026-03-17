@@ -14,7 +14,8 @@
   },
   "homepage": "https://github.com/yezhipeng2417/Infinite-Terminal#readme",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.85.0",
+    "node": ">=20"
   },
   "categories": [
     "Other",
