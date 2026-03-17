@@ -1125,68 +1125,97 @@ function autoLayout() {
   const terms = [...S.terminals.values()];
   if (terms.length === 0) return;
 
-  const gap = 30;
-  const vw = canvasContainer.clientWidth;
-  const vh = canvasContainer.clientHeight;
+  const gap = 20;           // gap between terminals within a cluster
+  const clusterGap = 120;   // gap between clusters (groups)
 
-  if (terms.length === 1) {
-    // Single terminal: center it
-    const t = terms[0];
-    t.x = 50;
-    t.y = 50;
-    applyTerminalPosition(t);
-    fitAll();
-    autoSaveLayout();
-    return;
-  }
+  // ---- Step 1: Split terminals into clusters (by group + ungrouped) ----
+  const groupedIds = new Set();
+  const clusters = [];  // { name, color, terms[] }
 
-  // Calculate the ideal number of columns based on viewport aspect ratio
-  // and terminal count - try to make a roughly rectangular grid
-  const avgW = terms.reduce((s, t) => s + t.w, 0) / terms.length;
-  const avgH = terms.reduce((s, t) => s + t.h, 0) / terms.length;
-  const aspectRatio = vw / vh;
-  let cols = Math.max(1, Math.round(Math.sqrt(terms.length * aspectRatio * (avgH / avgW))));
-  cols = Math.min(cols, terms.length);
-
-  // Sort terminals: larger ones first for better packing
-  terms.sort((a, b) => (b.w * b.h) - (a.w * a.h));
-
-  // Row-based packing: fill each row left-to-right, track row height
-  const rows = [];     // array of { terms: [], maxH: number }
-  let currentRow = { terms: [], maxH: 0 };
-  let colCount = 0;
-
-  for (const t of terms) {
-    if (colCount >= cols && currentRow.terms.length > 0) {
-      rows.push(currentRow);
-      currentRow = { terms: [], maxH: 0 };
-      colCount = 0;
+  for (const [_, g] of S.groups) {
+    const clusterTerms = [];
+    for (const tid of g.terminalIds) {
+      const t = S.terminals.get(tid);
+      if (t) { clusterTerms.push(t); groupedIds.add(tid); }
     }
-    currentRow.terms.push(t);
-    currentRow.maxH = Math.max(currentRow.maxH, t.h);
-    colCount++;
+    if (clusterTerms.length > 0) {
+      clusters.push({ name: g.name, color: g.color, groupId: g.id, terms: clusterTerms });
+    }
   }
-  if (currentRow.terms.length > 0) rows.push(currentRow);
 
-  // Position each terminal
-  let cursorY = 50;
-  for (const row of rows) {
-    // Calculate total width needed for this row
-    const totalRowW = row.terms.reduce((s, t) => s + t.w, 0) + gap * (row.terms.length - 1);
+  // Ungrouped terminals form their own cluster
+  const ungrouped = terms.filter(t => !groupedIds.has(t.id));
+  if (ungrouped.length > 0) {
+    clusters.push({ name: null, color: null, groupId: null, terms: ungrouped });
+  }
 
-    // Start x: center the row
-    let cursorX = 50;
+  // ---- Step 2: Pack each cluster using shelf packing ----
+  // Returns { w, h } of the packed bounding box (positions set relative to 0,0)
+  function shelfPack(items, innerGap) {
+    if (items.length === 0) return { w: 0, h: 0 };
+    if (items.length === 1) { items[0]._lx = 0; items[0]._ly = 0; return { w: items[0].w, h: items[0].h }; }
 
-    for (const t of row.terms) {
-      t.x = cursorX;
-      t.y = cursorY;
+    // Sort by height descending for better shelf packing
+    items.sort((a, b) => b.h - a.h);
+
+    // Determine shelf width: aim for roughly square bounding box
+    const totalArea = items.reduce((s, t) => s + t.w * t.h, 0);
+    const targetW = Math.max(items[0].w, Math.sqrt(totalArea) * 1.2);
+
+    let shelfX = 0, shelfY = 0, shelfH = 0, maxW = 0;
+
+    for (const t of items) {
+      // If adding this item exceeds target width, start new shelf
+      if (shelfX > 0 && shelfX + t.w > targetW) {
+        shelfY += shelfH + innerGap;
+        shelfX = 0;
+        shelfH = 0;
+      }
+      t._lx = shelfX;
+      t._ly = shelfY;
+      shelfX += t.w + innerGap;
+      shelfH = Math.max(shelfH, t.h);
+      maxW = Math.max(maxW, shelfX - innerGap);
+    }
+
+    return { w: maxW, h: shelfY + shelfH };
+  }
+
+  // Pack each cluster
+  const packedClusters = [];
+  for (const cluster of clusters) {
+    const bounds = shelfPack(cluster.terms, gap);
+    packedClusters.push({ ...cluster, bw: bounds.w, bh: bounds.h });
+  }
+
+  // ---- Step 3: Place clusters on canvas with spacing ----
+  // Use shelf packing again at the cluster level for a clean arrangement
+  // Sort clusters: largest first
+  packedClusters.sort((a, b) => (b.bw * b.bh) - (a.bw * a.bh));
+
+  const clusterTotalArea = packedClusters.reduce((s, c) => s + c.bw * c.bh, 0);
+  const clusterTargetW = Math.max(packedClusters[0].bw, Math.sqrt(clusterTotalArea) * 1.4);
+
+  let cx = 50, cy = 50, rowH = 0, rowMaxW = 0;
+  for (const cluster of packedClusters) {
+    if (cx > 50 && cx + cluster.bw > clusterTargetW + 50) {
+      cy += rowH + clusterGap;
+      cx = 50;
+      rowH = 0;
+    }
+
+    // Apply positions: cluster offset + local packed position
+    for (const t of cluster.terms) {
+      t.x = cx + t._lx;
+      t.y = cy + t._ly;
       applyTerminalPosition(t);
-      cursorX += t.w + gap;
     }
-    cursorY += row.maxH + gap;
+
+    cx += cluster.bw + clusterGap;
+    rowH = Math.max(rowH, cluster.bh);
   }
 
-  // Animate into view
+  // ---- Step 4: Finish ----
   fitAll();
   updateMinimap();
   updateConnectionLines();
