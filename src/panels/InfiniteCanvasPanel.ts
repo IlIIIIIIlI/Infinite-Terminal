@@ -27,6 +27,12 @@ interface SavedLayout {
     worktreeBranch?: string;
     parentId?: string;
   }>;
+  groups?: Array<{
+    id: string;
+    name: string;
+    color: string;
+    terminalIds: string[];
+  }>;
   canvasX: number;
   canvasY: number;
   zoom: number;

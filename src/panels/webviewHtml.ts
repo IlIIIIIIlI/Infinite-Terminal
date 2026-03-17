@@ -31,12 +31,17 @@ export function getWebviewHtml(
     <button class="toolbar-btn" id="btn-auto-layout" title="Auto Layout">⊞ Layout</button>
     <button class="toolbar-btn" id="btn-reset-zoom">🔍 100%</button>
     <div class="toolbar-sep"></div>
+    <button class="toolbar-btn" id="btn-group" title="Group selected terminals (Shift+Click to select)">📦 Group</button>
+    <button class="toolbar-btn" id="btn-ungroup" title="Ungroup focused terminal">📤 Ungroup</button>
+    <div class="toolbar-sep"></div>
     <button class="toolbar-btn" id="btn-preset-mgr" title="Manage Presets">⚙️ Presets</button>
-    <!-- <button class="toolbar-btn" id="btn-office-view" title="Pixel Office View">🏢 Office</button> -->
   </div>
 
   <!-- Preset Dock -->
   <div id="preset-dock"></div>
+
+  <!-- Group Nav Bar -->
+  <div id="group-nav"></div>
 
   <!-- Minimap -->
   <div id="minimap"><canvas id="minimap-canvas"></canvas></div>
@@ -84,6 +89,22 @@ export function getWebviewHtml(
       <div class="modal-actions">
         <button class="modal-btn" id="worktree-new-btn">🌿 New Worktree</button>
         <button class="modal-btn modal-btn-secondary" id="worktree-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Group Edit Modal -->
+  <div id="group-modal" class="modal">
+    <div class="modal-content">
+      <h3 id="group-modal-title">Create Group</h3>
+      <div class="modal-form">
+        <input id="group-name-input" type="text" placeholder="Group name" />
+        <div id="group-color-picker" style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0;"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" id="group-save-btn">Save</button>
+        <button class="modal-btn modal-btn-secondary" id="group-cancel-btn">Cancel</button>
+        <button class="modal-btn modal-btn-danger" id="group-delete-btn" style="display:none">Delete Group</button>
       </div>
     </div>
   </div>
@@ -326,6 +347,56 @@ body {
   background:transparent; border:none; color:var(--accent); cursor:pointer; font-size:12px;
 }
 
+/* Terminal selection */
+.terminal-card.selected {
+  outline: 2px dashed var(--accent); outline-offset: 2px;
+}
+
+/* Group frame on canvas */
+.group-frame {
+  position:absolute; border:2px solid; border-radius:12px;
+  pointer-events:none; transition: opacity 0.2s;
+}
+.group-frame-label {
+  position:absolute; top:-24px; left:8px;
+  font-size:11px; font-weight:600; padding:2px 10px; border-radius:4px;
+  pointer-events:auto; cursor:pointer; white-space:nowrap;
+  user-select:none;
+}
+
+/* Group nav bar (left side) */
+#group-nav {
+  position:fixed; top:60px; left:12px; display:flex; flex-direction:column; gap:4px;
+  z-index:1000;
+}
+.group-nav-btn {
+  display:flex; align-items:center; gap:6px;
+  background:var(--surface); border:2px solid; color:var(--text);
+  padding:5px 12px; border-radius:6px; cursor:pointer; font-size:11px;
+  font-weight:500; transition:all 0.15s; white-space:nowrap;
+  box-shadow:0 2px 8px var(--shadow);
+}
+.group-nav-btn:hover { transform:translateX(3px); filter:brightness(1.15); }
+.group-nav-btn .gnb-dot {
+  width:10px; height:10px; border-radius:50%; flex-shrink:0;
+}
+.group-nav-btn .gnb-count {
+  font-size:10px; opacity:0.6;
+}
+
+/* Group color picker swatches */
+.color-swatch {
+  width:28px; height:28px; border-radius:6px; cursor:pointer;
+  border:2px solid transparent; transition:all 0.15s;
+}
+.color-swatch:hover { transform:scale(1.15); }
+.color-swatch.active { border-color:var(--text); box-shadow:0 0 0 2px var(--accent); }
+
+/* Toolbar btn disabled look */
+.toolbar-btn:disabled, .toolbar-btn[disabled] {
+  opacity:0.4; cursor:default; pointer-events:none;
+}
+
 
 `;
 
@@ -338,6 +409,9 @@ const vscode = acquireVsCodeApi();
 // ==================== STATE ====================
 const S = {
   terminals: new Map(),
+  groups: new Map(),        // id -> { id, name, color, terminalIds: Set }
+  selectedTerminals: new Set(),
+  groupCounter: 0,
   canvasX: 0, canvasY: 0, zoom: 1,
   isDraggingCanvas: false, isDraggingTerminal: false,
   dragTarget: null, dragOffsetX: 0, dragOffsetY: 0,
@@ -349,7 +423,13 @@ const S = {
   zCounter: 10,
   presets: [],
   searchIdx: 0,
+  editingGroupId: null,     // for group modal
 };
+
+const GROUP_COLORS = [
+  '#007acc', '#4ec9b0', '#dcdcaa', '#f44747', '#c586c0',
+  '#ce9178', '#6a9955', '#569cd6', '#d7ba7d', '#9cdcfe',
+];
 
 const $ = id => document.getElementById(id);
 const canvasContainer = $('canvas-container');
@@ -465,7 +545,14 @@ function createTerminalCard(id, name, cwd, hasPty, parentId) {
   // Drag header
   header.addEventListener('mousedown', e => { if(e.target===closeBtn) return; startDragTerminal(e,id); });
   closeBtn.addEventListener('click', () => closeTerminal(id));
-  card.addEventListener('mousedown', () => focusTerminal(id));
+  card.addEventListener('mousedown', (e) => {
+    if (e.shiftKey) {
+      e.stopPropagation();
+      toggleSelectTerminal(id);
+    } else {
+      focusTerminal(id);
+    }
+  });
 
   // xterm.js terminal instance - theme follows VS Code
   const cs = getComputedStyle(document.body);
@@ -590,6 +677,8 @@ function closeTerminal(id) {
   const card = document.getElementById('term-'+id);
   if (card) card.remove();
   S.terminals.delete(id);
+  S.selectedTerminals.delete(id);
+  ungroupTerminal(id);
   vscode.postMessage({ type:'closeTerminal', id });
   updateMinimap();
   updateConnectionLines();
@@ -670,6 +759,7 @@ window.addEventListener('mousemove', e => {
     if (card) { card.style.left=t.x+'px'; card.style.top=t.y+'px'; }
     minimapEl.classList.add('visible');
     updateMinimap(); updateConnectionLines();
+    updateAllGroupFrames();
   }
   if (S.isResizing && S.resizeTarget) {
     const t = S.terminals.get(S.resizeTarget);
@@ -678,6 +768,7 @@ window.addEventListener('mousemove', e => {
     t.h = Math.max(220, S.resizeStartH + (e.clientY-S.resizeStartY)/S.zoom);
     const card = document.getElementById('term-'+S.resizeTarget);
     if (card) { card.style.width=t.w+'px'; card.style.height=t.h+'px'; }
+    updateAllGroupFrames();
   }
 });
 
@@ -742,6 +833,282 @@ function fitAll() {
   S.canvasY = (vh - cH*S.zoom)/2 - minY*S.zoom + pad*S.zoom + 50;
   updateTransform();
 }
+
+// ==================== TERMINAL SELECTION ====================
+function toggleSelectTerminal(id) {
+  if (S.selectedTerminals.has(id)) {
+    S.selectedTerminals.delete(id);
+  } else {
+    S.selectedTerminals.add(id);
+  }
+  updateSelectionUI();
+}
+
+function clearSelection() {
+  S.selectedTerminals.clear();
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  document.querySelectorAll('.terminal-card').forEach(c => {
+    const tid = c.id.replace('term-', '');
+    c.classList.toggle('selected', S.selectedTerminals.has(tid));
+  });
+  // Enable/disable group button based on selection
+  const groupBtn = $('btn-group');
+  if (groupBtn) {
+    if (S.selectedTerminals.size >= 1) {
+      groupBtn.removeAttribute('disabled');
+    } else {
+      groupBtn.setAttribute('disabled', '');
+    }
+  }
+}
+
+// ==================== GROUPS ====================
+function createGroup(name, color, terminalIds) {
+  S.groupCounter++;
+  const id = 'group_' + S.groupCounter + '_' + Date.now();
+  const group = { id, name, color, terminalIds: new Set(terminalIds) };
+  S.groups.set(id, group);
+  renderGroupFrame(group);
+  renderGroupNav();
+  autoSaveLayout();
+  return group;
+}
+
+function deleteGroup(groupId) {
+  const frame = document.getElementById('gframe-' + groupId);
+  if (frame) frame.remove();
+  S.groups.delete(groupId);
+  renderGroupNav();
+  autoSaveLayout();
+}
+
+function ungroupTerminal(termId) {
+  for (const [gid, g] of S.groups) {
+    if (g.terminalIds.has(termId)) {
+      g.terminalIds.delete(termId);
+      if (g.terminalIds.size === 0) {
+        deleteGroup(gid);
+      } else {
+        updateGroupFrame(g);
+      }
+    }
+  }
+  renderGroupNav();
+  autoSaveLayout();
+}
+
+function getGroupBounds(group) {
+  const pad = 20;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let count = 0;
+  for (const tid of group.terminalIds) {
+    const t = S.terminals.get(tid);
+    if (!t) continue;
+    minX = Math.min(minX, t.x);
+    minY = Math.min(minY, t.y);
+    maxX = Math.max(maxX, t.x + t.w);
+    maxY = Math.max(maxY, t.y + t.h);
+    count++;
+  }
+  if (count === 0) return null;
+  return { x: minX - pad, y: minY - pad - 20, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 + 20 };
+}
+
+function renderGroupFrame(group) {
+  let frame = document.getElementById('gframe-' + group.id);
+  if (!frame) {
+    frame = document.createElement('div');
+    frame.className = 'group-frame';
+    frame.id = 'gframe-' + group.id;
+    // Insert at start of canvas so it's behind terminal cards
+    canvasEl.insertBefore(frame, canvasEl.firstChild);
+  }
+
+  const bounds = getGroupBounds(group);
+  if (!bounds) { frame.style.display = 'none'; return; }
+
+  frame.style.display = '';
+  frame.style.left = bounds.x + 'px';
+  frame.style.top = bounds.y + 'px';
+  frame.style.width = bounds.w + 'px';
+  frame.style.height = bounds.h + 'px';
+  frame.style.borderColor = group.color;
+  frame.style.background = group.color + '10';
+
+  // Label
+  let label = frame.querySelector('.group-frame-label');
+  if (!label) {
+    label = document.createElement('div');
+    label.className = 'group-frame-label';
+    label.addEventListener('dblclick', () => openGroupModal(group.id));
+    frame.appendChild(label);
+  }
+  label.textContent = group.name;
+  label.style.background = group.color;
+  label.style.color = isLightColor(group.color) ? '#000' : '#fff';
+}
+
+function updateGroupFrame(group) {
+  renderGroupFrame(group);
+}
+
+function updateAllGroupFrames() {
+  for (const [_, g] of S.groups) {
+    updateGroupFrame(g);
+  }
+}
+
+function isLightColor(hex) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return (r*0.299 + g*0.587 + b*0.114) > 150;
+}
+
+// ==================== GROUP NAV ====================
+function renderGroupNav() {
+  const nav = $('group-nav');
+  nav.innerHTML = '';
+  for (const [_, g] of S.groups) {
+    const btn = document.createElement('button');
+    btn.className = 'group-nav-btn';
+    btn.style.borderColor = g.color;
+    btn.innerHTML = '<span class="gnb-dot" style="background:' + g.color + '"></span>' +
+      escHtml(g.name) +
+      '<span class="gnb-count">' + g.terminalIds.size + '</span>';
+    btn.addEventListener('click', () => navigateToGroup(g.id));
+    btn.addEventListener('dblclick', () => openGroupModal(g.id));
+    nav.appendChild(btn);
+  }
+}
+
+function navigateToGroup(groupId) {
+  const group = S.groups.get(groupId);
+  if (!group) return;
+  const bounds = getGroupBounds(group);
+  if (!bounds) return;
+
+  const vw = canvasContainer.clientWidth;
+  const vh = canvasContainer.clientHeight;
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+
+  // Zoom to fit the group with some padding
+  const padFactor = 1.3;
+  const zoomW = vw / (bounds.w * padFactor);
+  const zoomH = vh / (bounds.h * padFactor);
+  S.zoom = Math.min(1, Math.min(zoomW, zoomH));
+
+  S.canvasX = vw / 2 - cx * S.zoom;
+  S.canvasY = vh / 2 - cy * S.zoom;
+  updateTransform();
+  updateMinimap();
+}
+
+// ==================== GROUP MODAL ====================
+function openGroupModal(existingGroupId) {
+  const modal = $('group-modal');
+  const nameInput = $('group-name-input');
+  const title = $('group-modal-title');
+  const deleteBtn = $('group-delete-btn');
+  const picker = $('group-color-picker');
+
+  S.editingGroupId = existingGroupId || null;
+
+  if (existingGroupId) {
+    const g = S.groups.get(existingGroupId);
+    title.textContent = 'Edit Group';
+    nameInput.value = g ? g.name : '';
+    deleteBtn.style.display = '';
+    renderColorPicker(picker, g ? g.color : GROUP_COLORS[0]);
+  } else {
+    title.textContent = 'Create Group';
+    nameInput.value = '';
+    deleteBtn.style.display = 'none';
+    const colorIdx = S.groups.size % GROUP_COLORS.length;
+    renderColorPicker(picker, GROUP_COLORS[colorIdx]);
+  }
+
+  modal.classList.add('visible');
+  nameInput.focus();
+}
+
+function renderColorPicker(container, activeColor) {
+  container.innerHTML = '';
+  for (const c of GROUP_COLORS) {
+    const swatch = document.createElement('div');
+    swatch.className = 'color-swatch' + (c === activeColor ? ' active' : '');
+    swatch.style.background = c;
+    swatch.addEventListener('click', () => {
+      container.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+      swatch.classList.add('active');
+    });
+    container.appendChild(swatch);
+  }
+}
+
+function getSelectedColor() {
+  const active = document.querySelector('#group-color-picker .color-swatch.active');
+  return active ? active.style.background : GROUP_COLORS[0];
+}
+
+$('group-save-btn').addEventListener('click', () => {
+  const name = $('group-name-input').value.trim() || 'Untitled Group';
+  const color = rgbToHex(getSelectedColor());
+
+  if (S.editingGroupId) {
+    // Edit existing group
+    const g = S.groups.get(S.editingGroupId);
+    if (g) {
+      g.name = name;
+      g.color = color;
+      updateGroupFrame(g);
+      renderGroupNav();
+      autoSaveLayout();
+    }
+  } else {
+    // Create new group from selected terminals
+    const ids = [...S.selectedTerminals];
+    if (ids.length === 0) { $('group-modal').classList.remove('visible'); return; }
+    createGroup(name, color, ids);
+    clearSelection();
+  }
+  $('group-modal').classList.remove('visible');
+});
+
+$('group-cancel-btn').addEventListener('click', () => {
+  $('group-modal').classList.remove('visible');
+});
+
+$('group-delete-btn').addEventListener('click', () => {
+  if (S.editingGroupId) {
+    deleteGroup(S.editingGroupId);
+  }
+  $('group-modal').classList.remove('visible');
+});
+
+function rgbToHex(color) {
+  if (color.startsWith('#')) return color;
+  const match = color.match(/\\d+/g);
+  if (!match || match.length < 3) return color;
+  return '#' + match.slice(0,3).map(n => parseInt(n).toString(16).padStart(2,'0')).join('');
+}
+
+// ==================== TOOLBAR GROUP BUTTONS ====================
+$('btn-group').addEventListener('click', () => {
+  if (S.selectedTerminals.size > 0) {
+    openGroupModal(null);
+  }
+});
+
+$('btn-ungroup').addEventListener('click', () => {
+  if (S.focusedTerminal) {
+    ungroupTerminal(S.focusedTerminal);
+  }
+});
 
 // ==================== AUTO LAYOUT ====================
 function autoLayout() {
@@ -813,6 +1180,7 @@ function autoLayout() {
   fitAll();
   updateMinimap();
   updateConnectionLines();
+  updateAllGroupFrames();
   autoSaveLayout();
 }
 
@@ -1004,7 +1372,11 @@ function autoSaveLayout() {
     for (const [id, t] of S.terminals) {
       terminals.push({ id:t.id, name:t.name, command:'', cwd:t.cwd, x:t.x, y:t.y, w:t.w, h:t.h, parentId:t.parentId||null });
     }
-    vscode.postMessage({ type:'saveLayout', layout:{ terminals, canvasX:S.canvasX, canvasY:S.canvasY, zoom:S.zoom }});
+    const groups = [];
+    for (const [id, g] of S.groups) {
+      groups.push({ id:g.id, name:g.name, color:g.color, terminalIds:[...g.terminalIds] });
+    }
+    vscode.postMessage({ type:'saveLayout', layout:{ terminals, groups, canvasX:S.canvasX, canvasY:S.canvasY, zoom:S.zoom }});
   }, 1000);
 }
 
@@ -1020,6 +1392,24 @@ function restoreLayout(layout) {
     S.nextTermX = t.x;
     S.nextTermY = t.y;
     vscode.postMessage({ type:'createTerminal', name:t.name, command:t.command||'', cwd:t.cwd, parentId:t.parentId });
+  }
+  // Restore groups after a short delay to let terminals be created
+  if (layout.groups && layout.groups.length) {
+    setTimeout(() => {
+      for (const g of layout.groups) {
+        // Only include terminal IDs that actually exist
+        const validIds = g.terminalIds.filter(tid => S.terminals.has(tid));
+        if (validIds.length > 0) {
+          const group = { id: g.id, name: g.name, color: g.color, terminalIds: new Set(validIds) };
+          S.groups.set(g.id, group);
+          // Track groupCounter
+          const match = g.id.match(/group_(\\d+)/);
+          if (match) S.groupCounter = Math.max(S.groupCounter, parseInt(match[1]));
+          renderGroupFrame(group);
+        }
+      }
+      renderGroupNav();
+    }, 500);
   }
 }
 
@@ -1095,7 +1485,17 @@ document.addEventListener('keydown', e => {
     }
   }
   if (e.key === 'Escape') {
-    document.querySelectorAll('.modal.visible').forEach(m => m.classList.remove('visible'));
+    const modals = document.querySelectorAll('.modal.visible');
+    if (modals.length) {
+      modals.forEach(m => m.classList.remove('visible'));
+    } else if (S.selectedTerminals.size > 0) {
+      clearSelection();
+    }
+  }
+  // Ctrl/Cmd+G to group selected
+  if (!inTerminal && (e.ctrlKey||e.metaKey) && e.key === 'g') {
+    e.preventDefault();
+    if (S.selectedTerminals.size > 0) openGroupModal(null);
   }
 });
 
