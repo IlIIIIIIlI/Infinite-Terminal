@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.3.20] - 2026-03-18
+
+### Added
+- **Terminal done flash**: completed terminals pulse with a glow animation when not focused
+- Flash color matches the terminal's group color (accent blue for ungrouped)
+- Group nav button also flashes when a terminal in that group completes
+- Clicking/focusing the terminal dismisses the flash
+
+## [0.3.19] - 2026-03-18
+
+### Added
+- **Group frame interaction**: click group frame to select, drag to move all terminals together
+- Hover group frame to reveal inline Edit and Ungroup action buttons
+- Clicking canvas or a terminal deselects the group
+
+## [0.3.18] - 2026-03-18
+
+### Added
+- **Smart auto-layout**: two-level NFDH shelf packing algorithm
+  - Terminals in the same group pack tightly together as a cluster
+  - Clusters are spaced 120px apart on the canvas
+  - Each cluster aims for ~square bounding box for compact arrangement
+
+### Fixed
+- Shift+Click on terminal header now triggers selection instead of drag
+
+## [0.3.17] - 2026-03-18
+
+### Added
+- **Per-terminal shell history**: each terminal gets its own `HISTFILE`
+  - Pressing up-arrow recalls only commands from the current terminal
+  - History files stored in `~/.infinite-terminal/history/`
+  - Works with both zsh and bash
+
+## [0.3.16] - 2026-03-17
+
+### Added
+- **Terminal groups**: Shift+Click to multi-select, then Group button or Ctrl/Cmd+G
+  - Named, color-coded groups with 10 preset colors
+  - Colored frames around grouped terminals on the canvas
+  - Group nav bar (left side) for quick jump between groups
+  - Double-click group label to edit name/color/delete
+  - Groups persist across sessions via layout save/restore
+
+## [0.3.15] - 2026-03-17
+
 ### Added
 - Auto Layout button in toolbar to arrange terminal tiles into a neat grid
 - Dependabot configuration for automated dependency updates
