@@ -20,8 +20,6 @@ export function getWebviewHtml(xtermJsUri: string, xtermCssInline: string, fitAd
   <!-- Toolbar -->
   <div id="toolbar">
     <button class="toolbar-btn" id="btn-new-terminal" title="New Terminal (Ctrl+Shift+N)">⬛ New</button>
-    <button class="toolbar-btn" id="btn-new-worktree" title="Git Worktree">🌿 Worktree</button>
-    <button class="toolbar-btn" id="btn-worktree-list" title="Manage Worktrees">📋 Trees</button>
     <div class="toolbar-sep"></div>
     <button class="toolbar-btn" id="btn-search" title="Search Terminals (Ctrl+P)">🔍 Search</button>
     <button class="toolbar-btn" id="btn-fit-all" title="Fit All">⊞ Fit</button>
@@ -688,14 +686,6 @@ canvasContainer.addEventListener('wheel', e => {
 // ==================== TOOLBAR ====================
 $('btn-new-terminal').addEventListener('click', () => {
   vscode.postMessage({ type:'createTerminal', name:'Terminal', command:'' });
-});
-$('btn-new-worktree').addEventListener('click', () => {
-  const branch = prompt('Branch name for worktree:');
-  if (branch) vscode.postMessage({ type:'createWorktree', branch });
-});
-$('btn-worktree-list').addEventListener('click', () => {
-  vscode.postMessage({ type:'requestWorktrees' });
-  $('worktree-modal').classList.add('visible');
 });
 $('btn-search').addEventListener('click', () => openSearch());
 $('btn-fit-all').addEventListener('click', fitAll);
