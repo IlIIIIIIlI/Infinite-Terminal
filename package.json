@@ -1,6 +1,6 @@
 {
   "name": "infinite-terminal",
-  "displayName": "Infinite Terminal - 无限终端",
+  "displayName": "Infinite Terminal",
   "description": "An infinite canvas for managing multiple terminals with pixel art office view",
   "version": "0.3.5",
   "publisher": "LouisYeah",

@@ -1,4 +1,4 @@
-# ∞ Infinite Terminal - 无限终端
+# ∞ Infinite Terminal
 
 A VS Code extension that provides an **infinite canvas** for managing multiple terminals, with real terminal I/O, git worktree integration, and a unique **pixel art office view**.
 
