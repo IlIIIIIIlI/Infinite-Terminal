@@ -51,7 +51,9 @@ if (!tryLoadPty()) {
         if (code === 0) {
           try {
             delete require.cache[require.resolve('node-pty')];
-          } catch {}
+          } catch (e: any) {
+            log(`failed to clear node-pty require cache: ${e.message}`);
+          }
           const ok = tryLoadPty();
           log(`after rebuild, node-pty loaded: ${ok}`);
         }
@@ -64,7 +66,9 @@ if (!tryLoadPty()) {
       setTimeout(() => {
         try {
           rebuild.kill();
-        } catch {}
+        } catch (e: any) {
+          log(`rebuild kill on timeout failed: ${e.message}`);
+        }
         log('rebuild timed out');
         resolve();
       }, 30000);
@@ -164,8 +168,8 @@ export class PtyManager {
         });
 
         this._processes.set(id, ptyProc);
-        return true;
         log(`node-pty spawn OK for ${id}`);
+        return true;
       } catch (err: any) {
         log(`node-pty spawn failed: ${err.message}, falling back`);
       }
@@ -227,11 +231,15 @@ export class PtyManager {
             // Send SIGWINCH and update env for resize
             try {
               process.kill(child.pid!, 'SIGWINCH');
-            } catch {}
+            } catch (e: any) {
+              log(`resize SIGWINCH failed for ${id}: ${e.message}`);
+            }
             // Also write stty resize command for script(1) wrapped shells
             try {
               child.stdin?.write(`stty cols ${c} rows ${r}\n`);
-            } catch {}
+            } catch (e: any) {
+              log(`resize stty write failed for ${id}: ${e.message}`);
+            }
           },
           kill: () => {
             child.kill();
@@ -281,7 +289,9 @@ export class PtyManager {
     if (proc) {
       try {
         proc.process.resize(cols, rows);
-      } catch {}
+      } catch (e: any) {
+        log(`resize failed for ${id}: ${e.message}`);
+      }
     }
   }
 
@@ -290,7 +300,9 @@ export class PtyManager {
     if (proc) {
       try {
         proc.process.kill();
-      } catch {}
+      } catch (e: any) {
+        log(`kill failed for ${id}: ${e.message}`);
+      }
       this._processes.delete(id);
     }
   }

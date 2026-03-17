@@ -490,7 +490,7 @@ function createTerminalCard(id, name, cwd, hasPty, parentId) {
   const initXterm = () => {
     if (body.clientWidth > 0 && body.clientHeight > 0) {
       term.open(body);
-      try { fitAddon.fit(); } catch {}
+      try { fitAddon.fit(); } catch (e) { console.warn('xterm fit failed:', e); }
       vscode.postMessage({ type:'terminalResize', id, cols:term.cols, rows:term.rows });
 
       term.onData(data => {
@@ -498,7 +498,7 @@ function createTerminalCard(id, name, cwd, hasPty, parentId) {
       });
 
       const doFit = () => {
-        try { fitAddon.fit(); vscode.postMessage({ type:'terminalResize', id, cols:term.cols, rows:term.rows }); } catch {}
+        try { fitAddon.fit(); vscode.postMessage({ type:'terminalResize', id, cols:term.cols, rows:term.rows }); } catch (e) { console.warn('xterm fit/resize failed:', e); }
       };
       new ResizeObserver(() => doFit()).observe(body);
     } else {

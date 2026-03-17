@@ -123,7 +123,9 @@ export class InfiniteCanvasPanel {
     let xtermCss = '';
     try {
       xtermCss = fs.readFileSync(xtermCssPath, 'utf8');
-    } catch {}
+    } catch (e: any) {
+      console.warn(`[InfiniteTerminal] Failed to load xterm.css: ${e.message}`);
+    }
     this._panel.webview.html = getWebviewHtml(
       xtermJsUri.toString(),
       xtermCss,
@@ -182,8 +184,7 @@ export class InfiniteCanvasPanel {
       this._disposables,
     );
 
-    // Fallback: listen for VS Code terminal close
-    // Listen for fallback terminal close
+    // Listen for fallback VS Code terminal close
     {
       vscode.window.onDidCloseTerminal(
         (terminal) => {
@@ -216,7 +217,7 @@ export class InfiniteCanvasPanel {
     command?: string,
     cwd?: string,
     parentId?: string,
-  ) {
+  ): Promise<string> {
     this._terminalCounter++;
     const id = `term_${this._terminalCounter}_${Date.now()}`;
     const termName = name || `Terminal ${this._terminalCounter}`;
@@ -243,8 +244,10 @@ export class InfiniteCanvasPanel {
       name: termName,
       cwd: termCwd,
       parentId: parentId || null,
-      hasPty: true,
+      hasPty: spawned,
     });
+
+    return id;
   }
 
   private _spawnFallbackTerminal(
@@ -329,8 +332,8 @@ export class InfiniteCanvasPanel {
   public async createWorktreeTerminal(branchName: string) {
     const info = await this._worktreeManager.createWorktree(branchName);
     if (info) {
-      this._doCreateTerminal(`🌿 ${branchName}`, undefined, info.path);
-      const session = [...this._terminals.values()].pop();
+      const id = await this._doCreateTerminal(`🌿 ${branchName}`, undefined, info.path);
+      const session = this._terminals.get(id);
       if (session) {
         session.worktreeBranch = branchName;
       }
@@ -360,7 +363,11 @@ export class InfiniteCanvasPanel {
     vscode.commands.executeCommand('setContext', 'infiniteTerminal.canvasActive', false);
 
     // Save layout before disposing
-    this._panel.webview.postMessage({ type: 'requestSaveLayout' });
+    try {
+      this._panel.webview.postMessage({ type: 'requestSaveLayout' });
+    } catch (e: any) {
+      console.warn(`[InfiniteTerminal] Could not request layout save during dispose: ${e.message}`);
+    }
 
     this._ptyManager.dispose();
     for (const [_, t] of this._fallbackTerminals) {

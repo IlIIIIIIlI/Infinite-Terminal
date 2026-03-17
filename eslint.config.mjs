@@ -33,7 +33,7 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', destructuredArrayIgnorePattern: '^_' },
       ],
-      'no-empty': ['error', { allowEmptyCatch: true }],
+      'no-empty': ['error', { allowEmptyCatch: false }],
     },
   },
   {

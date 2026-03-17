@@ -166,7 +166,7 @@ describe('InfiniteCanvasPanel', () => {
       type: 'terminalCreated',
       name: 'Fallback',
       cwd: '/workspace',
-      hasPty: true,
+      hasPty: false,
     });
     expect(findPostedMessage('terminalOutput')).toMatchObject({
       type: 'terminalOutput',
